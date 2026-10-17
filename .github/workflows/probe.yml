@@ -1,0 +1,28 @@
+name: Source Probe
+
+# 소스 후보가 GitHub 서버에서 열리는지 확인한다. 글을 올리지 않는다.
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - ".github/workflows/probe.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check candidates
+        run: |
+          UA="Mozilla/5.0 (compatible; ContentResearchBot/1.0)"
+          check() {
+            name="$1"; url="$2"
+            code=$(curl -sL -m 20 -A "$UA" -o /tmp/body.html -w "%{http_code} %{size_download}" "$url")
+            wall=$(grep -ciE "just a moment|cf-chl|captcha|보안 시스템" /tmp/body.html || true)
+            echo "$name | $code | bot-wall-hits=$wall"
+          }
+          check todayhumor "https://www.todayhumor.co.kr/board/list.php?table=bestofbest"
+          check bobaedream "https://www.bobaedream.co.kr/list?code=best"
+          check ruliweb    "https://bbs.ruliweb.com/best/humor"
+          check inven      "https://www.inven.co.kr/board/webzine/2097"
+          check 82cook     "https://www.82cook.com/entiz/enti.php?bn=15"
