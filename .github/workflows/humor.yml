@@ -1,0 +1,68 @@
+name: Humor Bot
+
+on:
+  schedule:
+    # 30분마다 깨어나서, 시간당 계획(2~3편)에서 시각이 지난 슬롯만 처리한다.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "스케줄 무시하고 지금 올릴 편수 (0 이면 스케줄대로)"
+        default: "0"
+
+permissions:
+  contents: write
+
+# 같은 시각에 두 번 돌면 중복 글이 올라가므로 한 번에 하나만 돌린다.
+concurrency:
+  group: humor-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # 설정/상태는 비공개 저장소에 둔다. 저장소 이름과 토큰은 Secrets 에서만 읽는다.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.PRIVATE_REPO }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Claude Code CLI
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run bot
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SITE_LOGIN_ID: ${{ secrets.SITE_LOGIN_ID }}
+          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          STATE_DIR: ${{ github.workspace }}/private
+        run: |
+          COUNT="${{ github.event.inputs.count }}"
+          if [ -n "$COUNT" ] && [ "$COUNT" != "0" ]; then
+            python -m bot.run --count "$COUNT"
+          else
+            python -m bot.run
+          fi
+
+      - name: Save state (private repo)
+        if: always()
+        working-directory: private
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "state $(date -u +'%Y-%m-%d %H:%M')"
+          git pull --rebase || true
+          git push
