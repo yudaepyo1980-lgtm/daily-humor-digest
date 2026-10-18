@@ -1,12 +1,12 @@
-"""오늘의유머 베스트 -> 재작성 -> 어드민 자유게시판 등록.
+"""커뮤니티 베스트(기본 루리웹 유머) -> 재작성 -> 어드민 자유게시판 등록.
 
-    python -m bot.run                 스케줄대로 (GitHub Actions 가 10분마다 호출)
+    python -m bot.run                 스케줄대로 (GitHub Actions 가 30분마다 호출)
     python -m bot.run --dry-run       읽고 재작성만 하고 out/ 에 미리보기를 만든다 (등록 안 함)
     python -m bot.run --dry-run --count 2
     python -m bot.run --count 1       스케줄 무시하고 지금 1편 등록
 
-스케줄: 한 시간마다 5~10편을 정하고, 그 시간 안의 랜덤한 시각에 하나씩 올린다.
-Actions 는 10분마다 깨어나서 "시각이 지난 슬롯"만 처리한다.
+스케줄: 마지막 실행 이후 흐른 시간 x (시간당 2~3편) 만큼 올린다. 실행이 늦게 와도 밀린 만큼
+따라잡고, 편 사이는 랜덤 간격을 둔다.
 """
 
 import argparse
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 
 POSTS_PER_HOUR = (2, 3)
-MAX_PER_RUN = 3
+MAX_PER_RUN = 8
 QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -182,45 +182,52 @@ def process_one(state, token, dry):
 
 
 # ---------------------------------------------------------------- 스케줄
+#
+# GitHub 예약 실행은 늦게, 불규칙하게 온다 (몇 시간 간격일 수도 있다).
+# 그래서 "몇 시에 몇 편" 이 아니라 "마지막 실행 이후 흐른 시간 x 시간당 편수" 로 계산해서
+# 밀린 만큼 한꺼번에 따라잡는다. 소수점은 carry 에 남겨 다음 실행으로 넘긴다.
 
-def make_plan(state):
+MAX_CATCHUP_HOURS = 4      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
+MAX_PER_DAY = 72           # 하루 상한 (시간당 3편 x 24)
+
+
+def plan_count(state):
+    """이번 실행에서 올릴 편수를 정한다."""
     now = now_kst()
-    hour_key = now.strftime("%Y-%m-%dT%H")
-    plan = state.get("plan") or {}
-    if plan.get("hour") == hour_key:
-        return plan
-    end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    remain = max(60, int((end - now).total_seconds()))
-    n = random.randint(*POSTS_PER_HOUR)
-    slots = sorted(now + timedelta(seconds=random.randint(0, remain - 1)) for _ in range(n))
-    plan = {"hour": hour_key, "slots": [s.isoformat() for s in slots], "done": 0}
-    state["plan"] = plan
-    log(f"이번 시간 계획: {n}편")
-    plog("   시각 " + ", ".join(f"{s:%H:%M}" for s in slots))
-    return plan
+    last = state.get("last_run")
+    hours = 1.0
+    if last:
+        hours = (now - datetime.fromisoformat(last)).total_seconds() / 3600
+    hours = max(0.0, min(hours, MAX_CATCHUP_HOURS))
+
+    budget = float(state.get("carry", 0.0)) + hours * random.uniform(*POSTS_PER_HOUR)
+    n = int(budget)
+    state["carry"] = round(budget - n, 3)
+
+    day_ago = now - timedelta(hours=24)
+    last_day = sum(1 for p in state["posted"] if datetime.fromisoformat(p["at"]) >= day_ago)
+    n = max(0, min(n, MAX_PER_RUN, MAX_PER_DAY - last_day))
+    log(f"마지막 실행 후 {hours:.1f}시간 -> 이번 계획 {n}편 (최근 24시간 {last_day}편)")
+    return n
 
 
 def run_schedule(state, token, dry):
-    plan = make_plan(state)
-    now = now_kst()
-    due = [i for i, s in enumerate(plan["slots"])
-           if i >= plan["done"] and datetime.fromisoformat(s) <= now]
-    if not due:
-        log(f"지금 올릴 슬롯 없음 (이번 시간 {plan['done']}/{len(plan['slots'])})")
+    n = plan_count(state)
+    state["last_run"] = now_kst().isoformat()
+    st.save(state)
+    if n <= 0:
         return
     refresh_queue(state)
     st.save(state)
-    time.sleep(random.randint(0, 30))  # 항상 같은 초에 올라가지 않게
-    for k, _ in enumerate(due[:MAX_PER_RUN]):
+    time.sleep(random.randint(0, 60))  # 항상 같은 초에 올라가지 않게
+    for k in range(n):
         if k:
-            time.sleep(random.randint(15, 45))
-        ok = process_one(state, token, dry)
-        plan["done"] += 1
-        st.save(state)
-        if not ok:
+            time.sleep(random.randint(40, 180))  # 편 사이 간격도 들쑥날쑥하게
+        if not process_one(state, token, dry):
             log("대기열이 비었다. 다음 실행 때 다시 읽는다.")
             state["queue_at"] = ""
             break
+        st.save(state)
 
 
 def main():

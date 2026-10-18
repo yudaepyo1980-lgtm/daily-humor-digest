@@ -17,7 +17,8 @@ DEFAULT = {
     "posted": [],      # {"key","admin_id","nick","title","at"}
     "queue": [],       # 아직 안 쓴 후보 (추천수 순)
     "queue_at": "",    # 후보를 마지막으로 읽은 시각
-    "plan": {},        # {"hour": "2026-10-17T21", "slots": [...ISO], "done": 0}
+    "last_run": "",    # 마지막 스케줄 실행 시각
+    "carry": 0.0,      # 편수 계산에서 남은 소수점
     "recent_nicks": [],
 }
 

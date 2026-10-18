@@ -2,7 +2,7 @@ name: Humor Bot
 
 on:
   schedule:
-    # 30분마다 깨어나서, 시간당 계획(2~3편)에서 시각이 지난 슬롯만 처리한다.
+    # 30분마다 깨어나서, 마지막 실행 이후 흐른 시간만큼 (시간당 2~3편) 올린다. 실행이 밀려도 따라잡는다.
     - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
@@ -25,7 +25,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
