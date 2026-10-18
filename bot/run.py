@@ -212,6 +212,17 @@ def plan_count(state):
     return n
 
 
+MAX_RUN_MINUTES = 150      # 한 번 실행에서 편 사이 대기까지 포함해 쓸 수 있는 최대 시간
+MIN_GAP_SEC = 45
+MAX_GAP_SEC = 45 * 60
+
+
+def random_gap():
+    """편 사이 대기 시간. 지수분포라서 짧게 연달아 올리기도, 길게 쉬기도 한다."""
+    mean = 3600 / sum(POSTS_PER_HOUR) * 2          # 시간당 평균 편수의 간격 (약 24분)
+    return max(MIN_GAP_SEC, min(MAX_GAP_SEC, random.expovariate(1 / mean)))
+
+
 def run_schedule(state, token, dry):
     n = plan_count(state)
     state["last_run"] = now_kst().isoformat()
@@ -220,14 +231,23 @@ def run_schedule(state, token, dry):
         return
     refresh_queue(state)
     st.save(state)
-    time.sleep(random.randint(0, 60))  # 항상 같은 초에 올라가지 않게
+    started = time.monotonic()
+    time.sleep(random.randint(0, 120))  # 항상 같은 초에 올라가지 않게
     for k in range(n):
         if k:
-            time.sleep(random.randint(40, 180))  # 편 사이 간격도 들쑥날쑥하게
+            gap = random_gap()
+            if (time.monotonic() - started + gap) / 60 > MAX_RUN_MINUTES:
+                # 시간이 모자라면 남은 편수는 다음 실행으로 넘긴다
+                state["carry"] = round(float(state.get("carry", 0.0)) + (n - k), 3)
+                log(f"실행 시간 한도로 {n - k}편은 다음 실행으로 넘긴다")
+                break
+            log(f"다음 글까지 {gap / 60:.1f}분 대기")
+            time.sleep(gap)
         if not process_one(state, token, dry):
             log("대기열이 비었다. 다음 실행 때 다시 읽는다.")
             state["queue_at"] = ""
             break
+        state["last_run"] = now_kst().isoformat()
         st.save(state)
 
 
