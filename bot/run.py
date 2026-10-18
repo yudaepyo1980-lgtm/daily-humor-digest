@@ -22,7 +22,7 @@ from pathlib import Path
 
 import importlib
 
-from bot import admin, filters, rewrite, state as st
+from bot import admin, filters, imaging, rewrite, state as st
 
 # 소스는 SOURCE 환경변수로 고른다 (bot/source_<이름>.py). 기본은 ruliweb.
 src = importlib.import_module("bot.source_" + os.environ.get("SOURCE", "ruliweb"))
@@ -147,7 +147,8 @@ def process_one(state, token, dry):
                     (OUT / name).write_bytes(raw)
                     image_urls[n] = name
                 else:
-                    image_urls[n] = admin.upload_image(token, name, raw, ctype)
+                    raw, new_ctype, name = imaging.enhance(raw, name)
+                    image_urls[n] = admin.upload_image(token, name, raw, new_ctype or ctype)
             except Exception as exc:  # noqa: BLE001
                 log(f"  이미지 {n} 실패")
         if imgs and not image_urls:
