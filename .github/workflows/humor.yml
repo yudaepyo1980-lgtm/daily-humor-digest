@@ -7,8 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "스케줄 무시하고 지금 올릴 편수 (0 이면 스케줄대로)"
+        description: "스케줄 무시하고 지금 처리할 편수 (0 이면 스케줄대로)"
         default: "0"
+      dry_run:
+        description: "true 면 읽기/재작성만 하고 등록하지 않는다 (시험용)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -49,8 +53,12 @@ jobs:
           STATE_DIR: ${{ github.workspace }}/private
         run: |
           COUNT="${{ github.event.inputs.count }}"
+          DRY=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
           if [ -n "$COUNT" ] && [ "$COUNT" != "0" ]; then
-            python -m bot.run --count "$COUNT"
+            python -m bot.run $DRY --count "$COUNT"
+          elif [ -n "$DRY" ]; then
+            python -m bot.run --dry-run
           else
             python -m bot.run
           fi

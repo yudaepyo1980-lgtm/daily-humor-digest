@@ -20,7 +20,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from bot import admin, rewrite, source_todayhumor as src, state as st
+import importlib
+
+from bot import admin, filters, rewrite, state as st
+
+# 소스는 SOURCE 환경변수로 고른다 (bot/source_<이름>.py). 기본은 ruliweb.
+src = importlib.import_module("bot.source_" + os.environ.get("SOURCE", "ruliweb"))
 
 KST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,6 +73,8 @@ def refresh_queue(state, force=False):
         key = f"{it['src']}:{it['no']}"
         if key in seen or it["title"] in titles or it["oknok"] < MIN_OKNOK:
             continue
+        if filters.is_blocked(it["title"]):
+            continue
         it["key"] = key
         cands.append(it)
     cands.sort(key=lambda x: (x["oknok"], x["hits"]), reverse=True)
@@ -103,9 +110,9 @@ def process_one(state, token, dry):
         log("글 처리 시작")
 
         try:
-            post = src.fetch_post(item["no"])
+            post = src.fetch_post(item["no"], **({"board": item["board"]} if "board" in item else {}))
         except Exception as exc:  # noqa: BLE001
-            log("  본문 읽기 실패")
+            log(f"  본문 읽기 실패 ({type(exc).__name__})")
             continue
         blocks = post["blocks"]
         imgs = [b for b in blocks if b["t"] == "img"]
@@ -156,8 +163,9 @@ def process_one(state, token, dry):
                 f'<meta charset="utf-8"><body style="max-width:720px;margin:20px auto;'
                 f'font:16px/1.7 sans-serif"><h2>{html.escape(data["title"])}</h2>'
                 f'<p style="color:#888">원글: {html.escape(item["title"])} · 추천 '
-                f'{item["oknok"]} · {src.BASE}/board/view.php?table={src.TABLE}&no={item["no"]}</p>'
+                f'{item["oknok"]} · {post["url"]}</p>'
                 f"{content}</body>", encoding="utf-8")
+            log("  미리보기 생성 (등록 안 함)")
             plog(f"  미리보기 저장: {path}")
             return True
 

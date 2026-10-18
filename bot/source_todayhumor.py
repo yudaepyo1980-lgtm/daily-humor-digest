@@ -7,6 +7,7 @@
 import html
 import re
 import time
+import urllib.error
 import urllib.request
 from html.parser import HTMLParser
 
@@ -21,8 +22,21 @@ def http_get(url, referer=None, binary=False, timeout=30):
     if referer:
         headers["Referer"] = referer
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = resp.read()
+    last = None
+    for attempt in range(3):  # 일시적인 연결 오류는 두 번까지 다시 시도한다
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read()
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code in (403, 404, 410):   # 막힌 것/없는 것은 다시 해도 같다
+                raise
+            last = exc
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+        time.sleep(3 * (attempt + 1))
+    else:
+        raise last
     time.sleep(REQUEST_GAP_SEC)
     return data if binary else data.decode("utf-8", "replace")
 
