@@ -37,6 +37,9 @@ QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MIN_OKNOK = 5
+MAX_FAILS_PER_ITEM = 3     # 같은 글이 기술적 이유로 이 횟수 실패하면 포기한다
+MAX_CONSECUTIVE_FAILS = 4  # 연속으로 이만큼 실패하면 시스템 문제로 보고 실행을 실패 처리한다
+_consecutive_fails = 0
 
 
 def now_kst():
@@ -98,8 +101,27 @@ def to_html(body, image_urls):
     return "\n".join(parts)
 
 
+def tech_fail(state, item, what, dry):
+    """읽기/재작성 같은 기술적 실패. 글 문제가 아니므로 '본 글' 로 치지 않고 다시 시도하게 둔다.
+    같은 글이 여러 번 실패하면 포기하고, 연속 실패가 많으면 실행 전체를 실패로 끝내 눈에 띄게 한다."""
+    global _consecutive_fails
+    _consecutive_fails += 1
+    key = item["key"]
+    fails = state.setdefault("fails", {})
+    fails[key] = fails.get(key, 0) + 1
+    log(f"  {what} (이 글 {fails[key]}번째, 연속 {_consecutive_fails}번째)")
+    if not dry and fails[key] < MAX_FAILS_PER_ITEM:
+        if key in state["seen"]:
+            state["seen"].remove(key)
+        if item["title"] in state["titles"]:
+            state["titles"].remove(item["title"])
+    if _consecutive_fails >= MAX_CONSECUTIVE_FAILS:
+        raise RuntimeError(f"연속 {_consecutive_fails}번 실패: {what}. 시스템 문제로 보고 중단한다.")
+
+
 def process_one(state, token, dry):
     """대기열에서 쓸 만한 글 하나를 골라 올린다. 올렸으면 True."""
+    global _consecutive_fails
     while state["queue"]:
         item = state["queue"].pop(0)
         key = item["key"]
@@ -112,8 +134,9 @@ def process_one(state, token, dry):
         try:
             post = src.fetch_post(item["no"], **({"board": item["board"]} if "board" in item else {}))
         except Exception as exc:  # noqa: BLE001
-            log(f"  본문 읽기 실패 ({type(exc).__name__})")
+            tech_fail(state, item, f"본문 읽기 실패 ({type(exc).__name__})", dry)
             continue
+        _consecutive_fails = 0
         blocks = post["blocks"]
         imgs = [b for b in blocks if b["t"] == "img"]
         text_len = sum(len(b["v"]) for b in blocks if b["t"] == "text")
@@ -127,8 +150,9 @@ def process_one(state, token, dry):
         try:
             data, reason = rewrite.rewrite(item["title"], blocks)
         except Exception as exc:  # noqa: BLE001
-            log("  재작성 실패")
+            tech_fail(state, item, f"재작성 실패 ({type(exc).__name__}: {str(exc)[:80]})", dry)
             continue
+        _consecutive_fails = 0
         if data is None:
             log("  재작성 단계에서 제외")
             plog(f"    이유: {reason}")
@@ -152,7 +176,7 @@ def process_one(state, token, dry):
             except Exception as exc:  # noqa: BLE001
                 log(f"  이미지 {n} 실패")
         if imgs and not image_urls:
-            log("  이미지가 하나도 안 올라가서 건너뜀")
+            tech_fail(state, item, "이미지가 하나도 안 올라감", dry)
             continue
 
         content = to_html(data["body"], image_urls)
@@ -176,6 +200,8 @@ def process_one(state, token, dry):
             "key": key, "admin_id": admin_id, "nick": nick,
             "title": data["title"], "at": now_kst().isoformat(),
         })
+        _consecutive_fails = 0
+        state.get("fails", {}).pop(key, None)
         log("  등록 완료")
         plog(f"    id={admin_id} [{nick}] {data['title']}")
         return True
@@ -275,8 +301,10 @@ def main():
         refresh_queue(state, force=True)
         process_one(state, token, True)
         return
-    run_schedule(state, token, False)
-    st.save(state)
+    try:
+        run_schedule(state, token, False)
+    finally:
+        st.save(state)
 
 
 if __name__ == "__main__":

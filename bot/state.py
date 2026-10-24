@@ -20,6 +20,7 @@ DEFAULT = {
     "last_run": "",    # 마지막 스케줄 실행 시각
     "carry": 0.0,      # 편수 계산에서 남은 소수점
     "recent_nicks": [],
+    "fails": {},       # 글별 기술 실패 횟수
 }
 
 
@@ -34,6 +35,7 @@ def save(state):
     state["seen"] = state["seen"][-3000:]
     state["titles"] = state["titles"][-3000:]
     state["posted"] = state["posted"][-1000:]
+    state["fails"] = dict(list(state.get("fails", {}).items())[-300:])
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
