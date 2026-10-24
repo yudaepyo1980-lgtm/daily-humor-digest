@@ -283,6 +283,9 @@ def main():
     ap.add_argument("--count", type=int, default=0)
     args = ap.parse_args()
 
+    if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+        sys.exit("GEMINI_API_KEY 가 설정되지 않았다. GitHub Secrets 에 GEMINI_API_KEY 를 넣어야 한다. "
+                 "(아무것도 읽거나 올리지 않고 종료한다)")
     state = st.load()
     token = None if args.dry_run else admin.login()
 

@@ -43,14 +43,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install Claude Code CLI
-        run: |
-          curl -fsSL https://claude.ai/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Run bot
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 재작성은 Gemini 무료 API 로만 한다. Claude 는 쓰지 않으므로 Claude 사용량이 차감되지 않는다.
+          REWRITE_PROVIDER: gemini
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SITE_LOGIN_ID: ${{ secrets.SITE_LOGIN_ID }}
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           STATE_DIR: ${{ github.workspace }}/private

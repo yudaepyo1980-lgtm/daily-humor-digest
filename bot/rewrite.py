@@ -1,8 +1,12 @@
-"""읽은 글을 커뮤니티 말투로 가볍게 다시 쓴다 (Claude Code CLI 사용)."""
+"""읽은 글을 커뮤니티 말투로 가볍게 다시 쓴다 (Gemini 무료 API 또는 Claude Code CLI)."""
 
 import json
+import os
 import re
 import subprocess
+import time
+import urllib.error
+import urllib.request
 
 PROMPT = """\
 아래는 커뮤니티 유머 게시판에 올라온 글이다. 이 글을 같은 게시판 말투로 가볍게 다시 써라.
@@ -50,9 +54,31 @@ def _extract_json(text):
     return json.loads(m.group(0))
 
 
-def rewrite(title, blocks, timeout=300):
-    body, img_count = blocks_to_prompt(blocks)
-    prompt = PROMPT.format(title=title, body=body[:6000])
+# ---------------------------------------------------------------- 모델 호출
+#
+# REWRITE_PROVIDER 로 고른다.
+#   gemini : Google Gemini 무료 API (GEMINI_API_KEY 필요). Claude 사용량이 차감되지 않는다.
+#   claude : Claude Code CLI (CLAUDE_CODE_OAUTH_TOKEN 필요). Claude 요금제 사용량이 차감된다.
+# 지정하지 않으면 GEMINI_API_KEY 가 있을 때 gemini, 없으면 claude.
+
+GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_MIN_INTERVAL = 7.0   # 무료 등급 분당 호출 제한(약 10회)을 넘지 않도록 호출 사이 최소 간격(초)
+_last_gemini_call = 0.0
+
+
+def provider():
+    p = (os.environ.get("REWRITE_PROVIDER") or "").lower()
+    if p in ("gemini", "claude"):
+        return p
+    return "gemini" if os.environ.get("GEMINI_API_KEY") else "claude"
+
+
+class Blocked(Exception):
+    """모델이 안전 필터로 응답을 거부한 경우. 글 문제이므로 건너뛴다."""
+
+
+def _call_claude(prompt, timeout):
     proc = subprocess.run(
         ["claude", "-p", "--output-format", "json"],
         input=prompt, capture_output=True, text=True, timeout=timeout,
@@ -62,11 +88,64 @@ def rewrite(title, blocks, timeout=300):
     outer = json.loads(proc.stdout)
     if outer.get("is_error"):
         raise RuntimeError(f"claude 오류: {str(outer.get('result'))[:200]}")
-    data = _extract_json(outer.get("result", ""))
+    return outer.get("result", "")
+
+
+def _call_gemini(prompt, timeout):
+    global _last_gemini_call
+    key = os.environ["GEMINI_API_KEY"]
+    wait = GEMINI_MIN_INTERVAL - (time.monotonic() - _last_gemini_call)
+    if wait > 0:
+        time.sleep(wait)
+    last = None
+    for model in [m.strip() for m in GEMINI_MODELS.split(",") if m.strip()]:
+        body = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            GEMINI_URL.format(model=model), data=body, method="POST",
+            headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        )
+        _last_gemini_call = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                out = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            # 한도 초과(429)/모델 없음(404)/일시 장애(5xx)면 다음 모델로 넘어간다
+            last = f"{model}: HTTP {exc.code}"
+            if exc.code in (429, 404, 500, 503):
+                continue
+            raise RuntimeError(f"gemini 오류 {exc.code}") from exc
+        if (out.get("promptFeedback") or {}).get("blockReason"):
+            raise Blocked(out["promptFeedback"]["blockReason"])
+        cands = out.get("candidates") or []
+        if not cands:
+            raise RuntimeError("gemini 응답에 후보가 없다")
+        if cands[0].get("finishReason") in ("SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"):
+            raise Blocked(cands[0]["finishReason"])
+        parts = (cands[0].get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts)
+        if text.strip():
+            return text
+        last = f"{model}: 빈 응답"
+    raise RuntimeError(f"gemini 모든 모델 실패 ({last})")
+
+
+def rewrite(title, blocks, timeout=300):
+    body, img_count = blocks_to_prompt(blocks)
+    prompt = PROMPT.format(title=title, body=body[:6000])
+    try:
+        text = _call_gemini(prompt, min(timeout, 90)) if provider() == "gemini" else _call_claude(prompt, timeout)
+    except Blocked as exc:
+        return None, f"모델 안전 필터({exc})"
+    data = _extract_json(text)
     if data.get("skip"):
         return None, data.get("reason", "")
     if not data.get("title") or not data.get("body"):
         raise ValueError("제목/본문이 비었다")
+    if isinstance(data["body"], str):
+        data["body"] = [x for x in data["body"].split("\n") if x.strip()]
     used = set(re.findall(r"\[IMG(\d+)\]", "\n".join(data["body"])))
     for i in range(1, img_count + 1):  # 빠진 이미지는 맨 뒤에 붙인다
         if str(i) not in used:

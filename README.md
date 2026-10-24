@@ -11,7 +11,8 @@
    밀려도 밀린 만큼 따라잡고(최대 4시간치, 하루 72편 상한), 편 사이는 들쑥날쑥하게 띄운다
    (지수분포 랜덤 간격: 45초~45분, 평균 약 20분). 한 번 실행은 최대 150분까지 이어지고,
    남은 편수는 다음 실행으로 넘긴다.
-3. 글 하나마다: 본문/이미지 읽기 -> Claude 가 재작성 -> 이미지를 어드민에 업로드 -> 글 등록.
+3. 글 하나마다: 본문/이미지 읽기 -> Gemini 무료 API 가 재작성 -> 이미지를 어드민에 업로드 -> 글 등록.
+   (Claude 는 쓰지 않는다. 모델은 `GEMINI_MODELS` 순서대로 시도하고 한도 초과면 다음 모델로 넘어간다.)
 4. 이미 본 글은 비공개 저장소의 `state.json` 의 `seen` 에 남겨서 다시 올리지 않는다.
    같은 제목이 다른 번호로 올라와도 걸러낸다.
 5. 닉네임은 비공개 저장소의 `nicknames.json` 50개에서 랜덤, 최근 10개는 피한다.
@@ -22,7 +23,7 @@
 ## 로컬 실행
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN=...      # claude setup-token 으로 발급
+export GEMINI_API_KEY=...               # https://aistudio.google.com 에서 발급 (무료)
 export SITE_LOGIN_ID=...
 export SITE_PASSWORD=...
 export STATE_DIR=/path/to/private       # site_config.json, nicknames.json, state.json 이 있는 폴더
@@ -44,7 +45,7 @@ python -m bot.run                       # 스케줄대로
 
 | 이름 | 값 |
 |---|---|
-| `CLAUDE_CODE_OAUTH_TOKEN` | `claude setup-token` 으로 만든 토큰 |
+| `GEMINI_API_KEY` | Google AI Studio 에서 만든 API 키 |
 | `SITE_LOGIN_ID` | 로그인 아이디 |
 | `SITE_PASSWORD` | 로그인 비밀번호 |
 | `PRIVATE_REPO` | 비공개 저장소 이름 (`계정/저장소`) |
