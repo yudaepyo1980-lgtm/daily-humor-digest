@@ -240,13 +240,16 @@ def plan_count(state):
 
 MAX_RUN_MINUTES = 150      # 한 번 실행에서 편 사이 대기까지 포함해 쓸 수 있는 최대 시간
 MIN_GAP_SEC = 45
-MAX_GAP_SEC = 45 * 60
+MAX_GAP_SEC = 40 * 60
+CATCHUP_TARGET_MIN = 50    # 밀린 글을 이 시간 안에 올리는 것을 목표로 간격 평균을 정한다
+NORMAL_MEAN_MIN = 24       # 밀린 게 적을 때의 평균 간격 (시간당 2.5편)
 
 
-def random_gap():
-    """편 사이 대기 시간. 지수분포라서 짧게 연달아 올리기도, 길게 쉬기도 한다."""
-    mean = 3600 / sum(POSTS_PER_HOUR) * 2          # 시간당 평균 편수의 간격 (약 24분)
-    return max(MIN_GAP_SEC, min(MAX_GAP_SEC, random.expovariate(1 / mean)))
+def random_gap(n=1):
+    """편 사이 대기 시간. 지수분포라서 짧게 연달아 올리기도, 길게 쉬기도 한다.
+    올릴 편수가 많으면 평균 간격을 줄여 목표 시간 안에 다 올린다."""
+    mean_min = min(NORMAL_MEAN_MIN, max(3.0, CATCHUP_TARGET_MIN / max(n - 1, 1)))
+    return max(MIN_GAP_SEC, min(MAX_GAP_SEC, random.expovariate(1 / (mean_min * 60))))
 
 
 def run_schedule(state, token, dry):
@@ -261,7 +264,7 @@ def run_schedule(state, token, dry):
     time.sleep(random.randint(0, 120))  # 항상 같은 초에 올라가지 않게
     for k in range(n):
         if k:
-            gap = random_gap()
+            gap = random_gap(n)
             if (time.monotonic() - started + gap) / 60 > MAX_RUN_MINUTES:
                 # 시간이 모자라면 남은 편수는 다음 실행으로 넘긴다
                 state["carry"] = round(float(state.get("carry", 0.0)) + (n - k), 3)
