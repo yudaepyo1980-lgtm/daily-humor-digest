@@ -109,6 +109,10 @@ def tech_fail(state, item, what, dry):
     key = item["key"]
     fails = state.setdefault("fails", {})
     fails[key] = fails.get(key, 0) + 1
+    # 실패 이유를 종류별로 세어 둔다 (나중에 어떤 실패가 많은지 보려는 용도)
+    stats = state.setdefault("fail_stats", {})
+    kind = what.split(":")[0][:60]
+    stats[kind] = stats.get(kind, 0) + 1
     log(f"  {what} (이 글 {fails[key]}번째, 연속 {_consecutive_fails}번째)")
     if not dry and fails[key] < MAX_FAILS_PER_ITEM:
         if key in state["seen"]:

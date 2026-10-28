@@ -21,6 +21,7 @@ DEFAULT = {
     "carry": 0.0,      # 편수 계산에서 남은 소수점
     "recent_nicks": [],
     "fails": {},       # 글별 기술 실패 횟수
+    "fail_stats": {},  # 실패 이유별 누적 횟수
 }
 
 
