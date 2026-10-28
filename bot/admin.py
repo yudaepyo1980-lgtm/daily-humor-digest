@@ -92,10 +92,10 @@ def upload_image(token, filename, data, content_type="image/jpeg"):
     return url if url.startswith("http") else cfg["host"] + url
 
 
-def create_post(token, title, content_html, nickname, thumbnail=""):
+def create_post(token, title, content_html, nickname, thumbnail="", board=None):
     cfg = _config()
     payload = {
-        "board_type": cfg.get("board", "free"), "author_nickname": nickname,
+        "board_type": board or cfg.get("board", "free"), "author_nickname": nickname,
         "is_notice": False, "is_pinned": False, "is_published": True,
         "title": title, "thumbnail": thumbnail, "content": content_html,
     }

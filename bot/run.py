@@ -187,6 +187,7 @@ def process_one(state, token, dry):
             path.write_text(
                 f'<meta charset="utf-8"><body style="max-width:720px;margin:20px auto;'
                 f'font:16px/1.7 sans-serif"><h2>{html.escape(data["title"])}</h2>'
+                f'<p style="color:#06c">게시판: {html.escape(data.get("board", "free"))}</p>'
                 f'<p style="color:#888">원글: {html.escape(item["title"])} · 추천 '
                 f'{item["oknok"]} · {post["url"]}</p>'
                 f"{content}</body>", encoding="utf-8")
@@ -195,15 +196,16 @@ def process_one(state, token, dry):
             return True
 
         nick = st.pick_nick(state)
-        admin_id = admin.create_post(token, data["title"], content, nick, thumb)
+        board = data.get("board") or rewrite.DEFAULT_BOARD
+        admin_id = admin.create_post(token, data["title"], content, nick, thumb, board)
         state["posted"].append({
-            "key": key, "admin_id": admin_id, "nick": nick,
+            "key": key, "admin_id": admin_id, "nick": nick, "board": board,
             "title": data["title"], "at": now_kst().isoformat(),
         })
         _consecutive_fails = 0
         state.get("fails", {}).pop(key, None)
         log("  등록 완료")
-        plog(f"    id={admin_id} [{nick}] {data['title']}")
+        plog(f"    id={admin_id} [{board}] [{nick}] {data['title']}")
         return True
     return False
 

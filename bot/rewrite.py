@@ -29,9 +29,16 @@ PROMPT = """\
 - 길이는 원글과 비슷하게. 억지로 늘리지 마라.
 - 다음 소재는 쓰지 말고 skip 처리해라: 선정적/성적인 내용, 정치, 종교, 사건사고, 범죄,
   질병, 죽음, 실존 인물 비방, 특정 업체 광고.
+- 만화, 웹툰, 카툰, 4컷 만화, 만평, 일러스트, 팬아트처럼 그림이나 만화 자체가 글의 핵심인 글도 skip 처리해라.
+
+게시판 분류(board): 글 성격을 보고 올릴 게시판을 정해라.
+- "sports_talk": 스포츠(축구, 야구, 농구, 배구, 골프, 격투기, 올림픽, 선수, 경기, 감독)가 글의 중심인 경우
+- "humor": 짤, 밈, 개그처럼 웃기는 것 자체가 핵심인 글 (특히 이미지 위주로 웃기는 글)
+- "free": 그 밖의 일상 썰, 공감/잡담, 게임, 애니, 연예, 사회 이야기 등
+헷갈리면 "free" 로 해라.
 
 출력은 JSON 하나만, 설명 없이:
-{{"skip": false, "title": "제목", "body": ["문단 또는 줄", "[IMG1]", "문단 ..."]}}
+{{"skip": false, "board": "free", "title": "제목", "body": ["문단 또는 줄", "[IMG1]", "문단 ..."]}}
 skip 이면: {{"skip": true, "reason": "이유"}}
 """
 
@@ -61,6 +68,8 @@ def _extract_json(text):
 #   claude : Claude Code CLI (CLAUDE_CODE_OAUTH_TOKEN 필요). Claude 요금제 사용량이 차감된다.
 # 지정하지 않으면 GEMINI_API_KEY 가 있을 때 gemini, 없으면 claude.
 
+BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
+DEFAULT_BOARD = "free"
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_MIN_INTERVAL = 7.0   # 무료 등급 분당 호출 제한(약 10회)을 넘지 않도록 호출 사이 최소 간격(초)
@@ -144,6 +153,8 @@ def rewrite(title, blocks, timeout=300):
         return None, data.get("reason", "")
     if not data.get("title") or not data.get("body"):
         raise ValueError("제목/본문이 비었다")
+    if data.get("board") not in BOARDS:   # 모르는 값이면 기본 게시판
+        data["board"] = DEFAULT_BOARD
     if isinstance(data["body"], str):
         data["body"] = [x for x in data["body"].split("\n") if x.strip()]
     used = set(re.findall(r"\[IMG(\d+)\]", "\n".join(data["body"])))
