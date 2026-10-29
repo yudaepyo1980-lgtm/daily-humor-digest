@@ -36,6 +36,16 @@ PROMPT = """\
   글과 함께 첨부된 이미지를 직접 보고 판단해라. 이미지가 만화 컷, 애니 캡처, 캐릭터 일러스트, 팬아트면 글이 어떻든 skip 이다.
   (실제 사진, 짤방 캡처, 커뮤니티 글 캡처, 표/그래프는 만화가 아니다.)
 
+먼저 이 글이 우리 커뮤니티(한국 스포츠 커뮤니티의 자유게시판)와 결이 맞는지 1~5점(fit)으로 엄격하게 매겨라.
+우리 게시판에 올라와도 자연스러운 글만 4점 이상이다. 애매하면 낮게 줘라.
+- 4~5점: 직장·학교·연애·가족·생활 공감 썰, 웃긴 상황·실수담·반전 일화, 꿀팁·정보, 음식·여행·동물·일상,
+  스포츠나 게임 이야기(실제 사진·경기·플레이 중심), 누가 봐도 바로 이해되고 웃기거나 공감되는 글.
+- 1~2점: 만화·애니·캐릭터 그림·서브컬처, 원작이나 특정 밈 배경지식이 있어야 이해되는 글,
+  대사만 인용한 의미 불명 이미지 짤, 특정 커뮤니티 내부 유행어·말투로만 웃기는 글, 정치·젠더 갈등·혐오·논쟁,
+  사건사고·질병·죽음, 광고, 글이나 맥락 없이 이미지 한 장만 던진 글, 전문 용어가 많은 글.
+- 3점: 평범하지만 딱히 끌리지 않는 글.
+점수와 함께 이유를 한 줄로 적어라(fit_reason).
+
 게시판 분류(board): 글 성격을 보고 올릴 게시판을 정해라.
 - "sports_talk": 스포츠(축구, 야구, 농구, 배구, 골프, 격투기, 올림픽, 선수, 경기, 감독)가 글의 중심인 경우
 - "humor": 짤, 밈, 개그처럼 웃기는 것 자체가 핵심인 글 (특히 이미지 위주로 웃기는 글)
@@ -43,7 +53,7 @@ PROMPT = """\
 헷갈리면 "free" 로 해라.
 
 출력은 JSON 하나만, 설명 없이:
-{{"skip": false, "board": "free", "title": "제목", "body": ["문단 또는 줄", "[IMG1]", "문단 ..."]}}
+{{"skip": false, "fit": 4, "fit_reason": "한 줄 이유", "board": "free", "title": "제목", "body": ["문단 또는 줄", "[IMG1]", "문단 ..."]}}
 skip 이면: {{"skip": true, "reason": "이유"}}
 """
 
@@ -75,6 +85,9 @@ def _extract_json(text):
 
 BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
 DEFAULT_BOARD = "free"
+MIN_FIT = 4            # 이 점수 미만이면 올리지 않는다
+MIN_FIT_SHORT = 5      # 글자가 거의 없는 이미지 위주 글은 더 엄격하게
+SHORT_TEXT_CHARS = 40
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_TIMEOUT = 50         # 모델 한 번 호출을 기다리는 최대 초. 넘으면 다음 모델로 넘어간다
@@ -187,6 +200,14 @@ def rewrite(title, blocks, timeout=300, images=None):
         return None, data.get("reason", "")
     if not data.get("title") or not data.get("body"):
         raise ValueError("제목/본문이 비었다")
+    try:
+        fit = int(data.get("fit", 0))
+    except (TypeError, ValueError):
+        fit = 0
+    text_chars = sum(len(b["v"]) for b in blocks if b["t"] == "text")
+    need = MIN_FIT_SHORT if text_chars < SHORT_TEXT_CHARS else MIN_FIT
+    if fit < need:   # 점수가 없거나 낮으면 올리지 않는다
+        return None, f"결 불일치(fit={fit}, 기준 {need}): {str(data.get('fit_reason', ''))[:60]}"
     if data.get("board") not in BOARDS:   # 모르는 값이면 기본 게시판
         data["board"] = DEFAULT_BOARD
     if isinstance(data["body"], str):

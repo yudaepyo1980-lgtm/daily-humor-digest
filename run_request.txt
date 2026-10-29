@@ -1,2 +1,2 @@
-1
-# image-aware filter check 1120
+calibrate 30
+# score past posts with the new fit gate

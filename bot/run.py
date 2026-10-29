@@ -11,6 +11,7 @@
 
 import argparse
 import html
+import json
 import mimetypes
 import os
 import random
@@ -36,7 +37,7 @@ MAX_PER_RUN = 8
 QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-MIN_OKNOK = 5
+MIN_OKNOK = 15            # 추천수가 이보다 낮은 후보는 읽지 않는다
 MAX_FAILS_PER_ITEM = 3     # 같은 글이 기술적 이유로 이 횟수 실패하면 포기한다
 MAX_CONSECUTIVE_FAILS = 4  # 연속으로 이만큼 실패하면 시스템 문제로 보고 실행을 실패 처리한다
 _consecutive_fails = 0
@@ -72,7 +73,7 @@ def refresh_queue(state, force=False):
     log("후보 목록 읽는 중")
     seen, titles = set(state["seen"]), set(state["titles"])
     cands = []
-    for it in src.fetch_candidates(pages=3):
+    for it in src.fetch_candidates(pages=5):
         key = f"{it['src']}:{it['no']}"
         if key in seen or it["title"] in titles or it["oknok"] < MIN_OKNOK:
             continue
@@ -184,7 +185,7 @@ def process_one(state, token, dry):
         if data is None:
             log("  재작성 단계에서 제외")
             plog(f"    이유: {reason}")
-            note_skip(state, "AI 제외(만화/정치/선정 등)")
+            note_skip(state, "결 불일치(점수 미달)" if str(reason).startswith("결 불일치") else "AI 제외(만화/정치/선정 등)")
             continue
         if filters.is_blocked(data["title"]):  # 재작성하면서 제외 단어가 제목에 들어온 경우
             log("  재작성한 제목에 제외 단어가 있어 건너뜀")
@@ -306,19 +307,71 @@ def run_schedule(state, token, dry):
                 break
             log(f"다음 글까지 {gap / 60:.1f}분 대기")
             time.sleep(gap)
-        if not process_one(state, token, dry):
-            log("대기열이 비었다. 다음 실행 때 다시 읽는다.")
+        ok = process_one(state, token, dry)
+        if not ok:
+            # 기준이 엄격해서 대기열이 금방 바닥난다. 실행당 한 번은 후보를 다시 읽어 이어간다.
+            log("대기열이 비어 후보를 다시 읽는다")
+            refresh_queue(state, force=True)
+            ok = process_one(state, token, dry)
+        if not ok:
+            log("맞는 글이 부족해 이번 실행은 여기까지. 억지로 채우지 않는다.")
             state["queue_at"] = ""
             break
         state["last_run"] = now_kst().isoformat()
         st.save(state)
 
 
+def calibrate(n):
+    """과거에 올린 글 몇 개를 새 기준으로 다시 채점해 결과를 calibration.json 에 남긴다 (올리지 않는다).
+    문제 글이 걸러지고 정상 글이 통과하는지 확인하려는 용도다."""
+    state = st.load()
+    posted = state["posted"]
+    known_bad = {"2195", "944", "1001", "981", "2163", "2162", "1583"}   # 사용자가 지적했거나 의심되는 글
+    picked = [p for p in posted if str(p["admin_id"]) in known_bad]
+    rest = [p for p in posted if str(p["admin_id"]) not in known_bad]
+    random.shuffle(rest)
+    picked += rest[:n]
+    results = []
+    for p in picked:
+        row = {"admin_id": p["admin_id"], "known_bad": str(p["admin_id"]) in known_bad}
+        try:
+            no = p["key"].split(":")[1]
+            post = src.fetch_post(no)
+            blocks = post["blocks"]
+            imgs = [b for b in blocks if b["t"] == "img"]
+            raws = []
+            for b in imgs[:3]:
+                try:
+                    raws.append(src.download_image(b["src"]))
+                except Exception:  # noqa: BLE001
+                    pass
+            row["text_chars"] = sum(len(b["v"]) for b in blocks if b["t"] == "text")
+            row["images"] = len(imgs)
+            data, reason = rewrite.rewrite(p["title"], blocks, images=raws)
+            row["result"] = "통과" if data else "건너뜀"
+            row["reason"] = "" if data else str(reason)[:100]
+            row["board"] = (data or {}).get("board", "")
+        except Exception as exc:  # noqa: BLE001
+            row["result"] = "오류"
+            row["reason"] = f"{type(exc).__name__}: {str(exc)[:60]}"
+        results.append(row)
+        log(f"채점 {len(results)}/{len(picked)}")
+    (st.STATE_DIR / "calibration.json").write_text(
+        json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+    ok = sum(1 for r in results if r["result"] == "통과")
+    log(f"채점 완료: 통과 {ok} / 건너뜀 {sum(1 for r in results if r['result'] == '건너뜀')} / 오류 {sum(1 for r in results if r['result'] == '오류')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--count", type=int, default=0)
+    ap.add_argument("--calibrate", type=int, default=0, help="과거 글 N개를 새 기준으로 다시 채점 (올리지 않음)")
     args = ap.parse_args()
+    if args.calibrate:
+        if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+            sys.exit("GEMINI_API_KEY 가 없다")
+        return calibrate(args.calibrate)
 
     if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
         sys.exit("GEMINI_API_KEY 가 설정되지 않았다. GitHub Secrets 에 GEMINI_API_KEY 를 넣어야 한다. "
