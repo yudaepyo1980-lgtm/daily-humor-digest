@@ -1,2 +1,2 @@
 preview 20
-# judge current candidates without posting
+# rejudge same candidates after prompt tightening 2226
