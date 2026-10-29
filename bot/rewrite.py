@@ -92,6 +92,7 @@ BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
 DEFAULT_BOARD = "free"
 MIN_FIT = 4            # 이 점수 미만이면 올리지 않는다
 MIN_FIT_SHORT = 5      # 글자가 사실상 없는(이미지만 있는) 글은 더 엄격하게
+REASON_BLOCK = ("캐릭터", "일러스트", "애니", "만화", "웹툰", "팬아트", "서브컬처", "코스프레", "조롱", "저격", "논란")
 SHORT_TEXT_CHARS = 10  # 과거 글 채점(10-29)에서 40자로 하면 멀쩡한 짧은 썰까지 대부분 탈락해 10자로 낮춤
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -213,6 +214,10 @@ def rewrite(title, blocks, timeout=300, images=None):
     need = MIN_FIT_SHORT if text_chars < SHORT_TEXT_CHARS else MIN_FIT
     if fit < need:   # 점수가 없거나 낮으면 올리지 않는다
         return None, f"결 불일치(fit={fit}, 기준 {need}): {str(data.get('fit_reason', ''))[:60]}"
+    reason_text = str(data.get("fit_reason", ""))
+    hit = [w for w in REASON_BLOCK if w in reason_text]
+    if hit:          # 모델이 점수는 높게 주고도 이유에는 서브컬처/조롱을 적은 경우 (모순)
+        return None, f"결 불일치(판정 이유에 '{hit[0]}' 언급): {reason_text[:60]}"
     if data.get("board") not in BOARDS:   # 모르는 값이면 기본 게시판
         data["board"] = DEFAULT_BOARD
     if isinstance(data["body"], str):
