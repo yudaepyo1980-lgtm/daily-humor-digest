@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -76,6 +77,7 @@ BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
 DEFAULT_BOARD = "free"
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_TIMEOUT = 50         # 모델 한 번 호출을 기다리는 최대 초. 넘으면 다음 모델로 넘어간다
 GEMINI_MIN_INTERVAL = 7.0   # 무료 등급 분당 호출 제한(약 10회)을 넘지 않도록 호출 사이 최소 간격(초)
 _last_gemini_call = 0.0
 
@@ -154,6 +156,10 @@ def _call_gemini(prompt, timeout, images=None):
             if exc.code in (429, 404, 500, 503):
                 continue
             raise RuntimeError(f"gemini 오류 {exc.code}") from exc
+        except (TimeoutError, socket.timeout, urllib.error.URLError, ConnectionError) as exc:
+            # 응답이 늦거나 연결이 끊기면 기다리지 말고 다음 모델로 넘어간다
+            last = f"{model}: {type(exc).__name__}"
+            continue
         if (out.get("promptFeedback") or {}).get("blockReason"):
             raise Blocked(out["promptFeedback"]["blockReason"])
         cands = out.get("candidates") or []
@@ -173,7 +179,7 @@ def rewrite(title, blocks, timeout=300, images=None):
     body, img_count = blocks_to_prompt(blocks)
     prompt = PROMPT.format(title=title, body=body[:6000])
     try:
-        text = _call_gemini(prompt, min(timeout, 90), images) if provider() == "gemini" else _call_claude(prompt, timeout)
+        text = _call_gemini(prompt, min(timeout, GEMINI_TIMEOUT), images) if provider() == "gemini" else _call_claude(prompt, timeout)
     except Blocked as exc:
         return None, f"모델 안전 필터({exc})"
     data = _extract_json(text)
