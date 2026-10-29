@@ -86,8 +86,8 @@ def _extract_json(text):
 BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
 DEFAULT_BOARD = "free"
 MIN_FIT = 4            # 이 점수 미만이면 올리지 않는다
-MIN_FIT_SHORT = 5      # 글자가 거의 없는 이미지 위주 글은 더 엄격하게
-SHORT_TEXT_CHARS = 40
+MIN_FIT_SHORT = 5      # 글자가 사실상 없는(이미지만 있는) 글은 더 엄격하게
+SHORT_TEXT_CHARS = 10  # 과거 글 채점(10-29)에서 40자로 하면 멀쩡한 짧은 썰까지 대부분 탈락해 10자로 낮춤
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_TIMEOUT = 50         # 모델 한 번 호출을 기다리는 최대 초. 넘으면 다음 모델로 넘어간다
