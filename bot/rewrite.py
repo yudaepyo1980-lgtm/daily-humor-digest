@@ -78,7 +78,14 @@ def _extract_json(text):
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
         raise ValueError("JSON 을 찾지 못했다")
-    return json.loads(m.group(0))
+    raw = m.group(0)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # 모델이 잘못된 역슬래시 이스케이프(\uXXXX 형식 오류 등)를 섞어 보낸 경우 고쳐서 다시 읽는다
+        fixed = re.sub(r"\\u(?![0-9a-fA-F]{4})", r"\\\\u", raw)
+        fixed = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", fixed)
+        return json.loads(fixed, strict=False)
 
 
 # ---------------------------------------------------------------- 모델 호출
