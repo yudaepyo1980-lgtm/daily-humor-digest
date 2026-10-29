@@ -1,5 +1,7 @@
 """읽은 글을 커뮤니티 말투로 가볍게 다시 쓴다 (Gemini 무료 API 또는 Claude Code CLI)."""
 
+import base64
+import io
 import json
 import os
 import re
@@ -29,7 +31,9 @@ PROMPT = """\
 - 길이는 원글과 비슷하게. 억지로 늘리지 마라.
 - 다음 소재는 쓰지 말고 skip 처리해라: 선정적/성적인 내용, 정치, 종교, 사건사고, 범죄,
   질병, 죽음, 실존 인물 비방, 특정 업체 광고.
-- 만화, 웹툰, 카툰, 4컷 만화, 만평, 일러스트, 팬아트처럼 그림이나 만화 자체가 글의 핵심인 글도 skip 처리해라.
+- 만화, 웹툰, 카툰, 4컷 만화, 만평, 일러스트, 팬아트, 애니/게임 캐릭터 그림처럼 그린 그림이 글의 핵심인 글도 skip 처리해라.
+  글과 함께 첨부된 이미지를 직접 보고 판단해라. 이미지가 만화 컷, 애니 캡처, 캐릭터 일러스트, 팬아트면 글이 어떻든 skip 이다.
+  (실제 사진, 짤방 캡처, 커뮤니티 글 캡처, 표/그래프는 만화가 아니다.)
 
 게시판 분류(board): 글 성격을 보고 올릴 게시판을 정해라.
 - "sports_talk": 스포츠(축구, 야구, 농구, 배구, 골프, 격투기, 올림픽, 선수, 경기, 감독)가 글의 중심인 경우
@@ -87,6 +91,28 @@ class Blocked(Exception):
     """모델이 안전 필터로 응답을 거부한 경우. 글 문제이므로 건너뛴다."""
 
 
+def _image_parts(images, max_side=768):
+    """모델에 보여줄 이미지를 작은 JPEG(base64)로 줄인다. 실패한 이미지는 건너뛴다."""
+    out = []
+    try:
+        from PIL import Image
+    except ImportError:
+        return out
+    for raw in images or []:
+        try:
+            im = Image.open(io.BytesIO(raw))
+            if getattr(im, "is_animated", False):
+                im.seek(0)
+            im = im.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80)
+            out.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def _call_claude(prompt, timeout):
     proc = subprocess.run(
         ["claude", "-p", "--output-format", "json"],
@@ -100,7 +126,7 @@ def _call_claude(prompt, timeout):
     return outer.get("result", "")
 
 
-def _call_gemini(prompt, timeout):
+def _call_gemini(prompt, timeout, images=None):
     global _last_gemini_call
     key = os.environ["GEMINI_API_KEY"]
     wait = GEMINI_MIN_INTERVAL - (time.monotonic() - _last_gemini_call)
@@ -108,8 +134,10 @@ def _call_gemini(prompt, timeout):
         time.sleep(wait)
     last = None
     for model in [m.strip() for m in GEMINI_MODELS.split(",") if m.strip()]:
+        parts = [{"text": prompt}] + [
+            {"inline_data": {"mime_type": "image/jpeg", "data": b64}} for b64 in _image_parts(images)]
         body = json.dumps({
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": parts}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.9},
         }).encode("utf-8")
         req = urllib.request.Request(
@@ -141,11 +169,11 @@ def _call_gemini(prompt, timeout):
     raise RuntimeError(f"gemini 모든 모델 실패 ({last})")
 
 
-def rewrite(title, blocks, timeout=300):
+def rewrite(title, blocks, timeout=300, images=None):
     body, img_count = blocks_to_prompt(blocks)
     prompt = PROMPT.format(title=title, body=body[:6000])
     try:
-        text = _call_gemini(prompt, min(timeout, 90)) if provider() == "gemini" else _call_claude(prompt, timeout)
+        text = _call_gemini(prompt, min(timeout, 90), images) if provider() == "gemini" else _call_claude(prompt, timeout)
     except Blocked as exc:
         return None, f"모델 안전 필터({exc})"
     data = _extract_json(text)

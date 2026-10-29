@@ -77,6 +77,7 @@ def refresh_queue(state, force=False):
         if key in seen or it["title"] in titles or it["oknok"] < MIN_OKNOK:
             continue
         if filters.is_blocked(it["title"]):
+            note_skip(state, "원글 제목 필터")
             continue
         it["key"] = key
         cands.append(it)
@@ -99,6 +100,12 @@ def to_html(body, image_urls):
             continue
         parts.append("<p>" + html.escape(line).replace("\n", "<br>") + "</p>")
     return "\n".join(parts)
+
+
+def note_skip(state, kind):
+    """건너뛴 이유별 누적 횟수 (state.skip_stats). 필터가 잘 동작하는지 볼 때 쓴다."""
+    stats = state.setdefault("skip_stats", {})
+    stats[kind] = stats.get(kind, 0) + 1
 
 
 def tech_fail(state, item, what, dry):
@@ -146,13 +153,30 @@ def process_one(state, token, dry):
         text_len = sum(len(b["v"]) for b in blocks if b["t"] == "text")
         if post["has_embed"]:
             log("  영상/임베드 포함 -> 건너뜀")
+            note_skip(state, "영상/임베드")
             continue
         if not blocks or (text_len < 15 and not imgs) or len(imgs) > MAX_IMAGES:
             log("  내용이 비었거나 이미지가 너무 많음 -> 건너뜀")
+            note_skip(state, "내용 없음/이미지 많음")
+            continue
+
+        # 이미지를 먼저 받아 둔다: 모델이 이미지를 직접 보고 만화/일러스트인지 판단하게 하고,
+        # 같은 이미지를 나중에 업로드에도 쓴다.
+        raws = {}
+        for n, b in enumerate(imgs, start=1):
+            try:
+                raw = src.download_image(b["src"])
+                if len(raw) > MAX_IMAGE_BYTES:
+                    raise RuntimeError("이미지가 너무 큼")
+                raws[n] = raw
+            except Exception:  # noqa: BLE001
+                log(f"  이미지 {n} 읽기 실패")
+        if imgs and not raws:
+            tech_fail(state, item, "이미지를 하나도 못 받음", dry)
             continue
 
         try:
-            data, reason = rewrite.rewrite(item["title"], blocks)
+            data, reason = rewrite.rewrite(item["title"], blocks, images=[raws[n] for n in sorted(raws)][:3])
         except Exception as exc:  # noqa: BLE001
             tech_fail(state, item, f"재작성 실패 ({type(exc).__name__}: {str(exc)[:80]})", dry)
             continue
@@ -160,25 +184,29 @@ def process_one(state, token, dry):
         if data is None:
             log("  재작성 단계에서 제외")
             plog(f"    이유: {reason}")
+            note_skip(state, "AI 제외(만화/정치/선정 등)")
+            continue
+        if filters.is_blocked(data["title"]):  # 재작성하면서 제외 단어가 제목에 들어온 경우
+            log("  재작성한 제목에 제외 단어가 있어 건너뜀")
+            plog(f"    제목: {data['title']}")
+            note_skip(state, "재작성 제목 필터")
             continue
 
-        image_urls, files = {}, {}
-        for n, b in enumerate(imgs, start=1):
+        image_urls = {}
+        for n, raw in raws.items():
             try:
-                raw = src.download_image(b["src"])
-                if len(raw) > MAX_IMAGE_BYTES:
-                    raise RuntimeError("이미지가 너무 큼")
-                ctype = mimetypes.guess_type(b["src"].split("?")[0])[0] or "image/jpeg"
+                src_url = imgs[n - 1]["src"]
+                ctype = mimetypes.guess_type(src_url.split("?")[0])[0] or "image/jpeg"
                 name = f"{item['no']}_{n}" + (mimetypes.guess_extension(ctype) or ".jpg")
                 if dry:
                     OUT.mkdir(exist_ok=True)
                     (OUT / name).write_bytes(raw)
                     image_urls[n] = name
                 else:
-                    raw, new_ctype, name = imaging.enhance(raw, name)
-                    image_urls[n] = admin.upload_image(token, name, raw, new_ctype or ctype)
-            except Exception as exc:  # noqa: BLE001
-                log(f"  이미지 {n} 실패")
+                    raw2, new_ctype, name = imaging.enhance(raw, name)
+                    image_urls[n] = admin.upload_image(token, name, raw2, new_ctype or ctype)
+            except Exception:  # noqa: BLE001
+                log(f"  이미지 {n} 업로드 실패")
         if imgs and not image_urls:
             tech_fail(state, item, "이미지가 하나도 안 올라감", dry)
             continue

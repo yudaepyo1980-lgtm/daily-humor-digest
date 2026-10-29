@@ -22,6 +22,7 @@ DEFAULT = {
     "recent_nicks": [],
     "fails": {},       # 글별 기술 실패 횟수
     "fail_stats": {},  # 실패 이유별 누적 횟수
+    "skip_stats": {},  # 건너뛴 이유별 누적 횟수
 }
 
 
