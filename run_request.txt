@@ -1,2 +1,2 @@
-calibrate 30
-# score past posts with the new fit gate
+1
+# run one post with the strict fit gate 2129
