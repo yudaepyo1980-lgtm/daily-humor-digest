@@ -1,2 +1,2 @@
-1
-# run one post with the strict fit gate 2129
+preview 20
+# judge current candidates without posting

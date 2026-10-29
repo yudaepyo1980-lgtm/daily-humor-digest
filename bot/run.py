@@ -362,12 +362,58 @@ def calibrate(n):
     log(f"채점 완료: 통과 {ok} / 건너뜀 {sum(1 for r in results if r['result'] == '건너뜀')} / 오류 {sum(1 for r in results if r['result'] == '오류')}")
 
 
+def preview(n):
+    """지금 대기열 맨 앞 후보 n개를 새 필터로 미리 판정해 preview.json 에 남긴다 (올리지 않고, 본 글 처리도 안 한다)."""
+    state = st.load()
+    refresh_queue(state, force=True)
+    results = []
+    for item in state["queue"][:n]:
+        row = {"원글제목": item["title"], "추천": item["oknok"]}
+        try:
+            post = src.fetch_post(item["no"], **({"board": item["board"]} if "board" in item else {}))
+            blocks = post["blocks"]
+            imgs = [b for b in blocks if b["t"] == "img"]
+            row["글자수"] = sum(len(b["v"]) for b in blocks if b["t"] == "text")
+            row["이미지"] = len(imgs)
+            if post["has_embed"]:
+                row.update(판정="탈락", 이유="영상/임베드"); results.append(row); continue
+            if not blocks or len(imgs) > MAX_IMAGES:
+                row.update(판정="탈락", 이유="내용 없음/이미지 많음"); results.append(row); continue
+            raws = []
+            for b in imgs[:3]:
+                try:
+                    raws.append(src.download_image(b["src"]))
+                except Exception:  # noqa: BLE001
+                    pass
+            data, reason = rewrite.rewrite(item["title"], blocks, images=raws)
+            if data is None:
+                row.update(판정="탈락", 이유=str(reason)[:110])
+            elif filters.is_blocked(data["title"]):
+                row.update(판정="탈락", 이유="재작성 제목에 제외 단어: " + data["title"])
+            else:
+                row.update(판정="통과", 이유=str(data.get("fit_reason", ""))[:90], 점수=data.get("fit"),
+                           게시판=data.get("board"), 새제목=data["title"])
+        except Exception as exc:  # noqa: BLE001
+            row.update(판정="오류", 이유=f"{type(exc).__name__}: {str(exc)[:60]}")
+        results.append(row)
+        log(f"미리 판정 {len(results)}/{min(n, len(state['queue']))}")
+    (st.STATE_DIR / "preview.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+    log("미리 판정 완료: 통과 %d / 탈락 %d / 오류 %d" % (
+        sum(r["판정"] == "통과" for r in results), sum(r["판정"] == "탈락" for r in results),
+        sum(r["판정"] == "오류" for r in results)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--count", type=int, default=0)
     ap.add_argument("--calibrate", type=int, default=0, help="과거 글 N개를 새 기준으로 다시 채점 (올리지 않음)")
+    ap.add_argument("--preview", type=int, default=0, help="지금 후보 N개를 새 필터로 미리 판정 (올리지 않음)")
     args = ap.parse_args()
+    if args.preview:
+        if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+            sys.exit("GEMINI_API_KEY 가 없다")
+        return preview(args.preview)
     if args.calibrate:
         if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
             sys.exit("GEMINI_API_KEY 가 없다")
