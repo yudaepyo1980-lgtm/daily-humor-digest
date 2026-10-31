@@ -1,2 +1,2 @@
-move
-# move all non-free bot posts to the free board
+audit 40
+# rescore recent posts with the final filter 2151
