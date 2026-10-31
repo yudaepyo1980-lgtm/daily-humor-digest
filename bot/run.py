@@ -321,6 +321,41 @@ def run_schedule(state, token, dry):
         st.save(state)
 
 
+def audit(n):
+    """최근에 올라간 글 n개를 지금 필터로 다시 채점한다 (필터를 통과해서 올라간 글이 실제로 괜찮은지 점검).
+    결과는 audit.json 에 남기고 올리지는 않는다."""
+    state = st.load()
+    picked = state["posted"][-n:]
+    results = []
+    for p in picked:
+        row = {"admin_id": p["admin_id"], "올라간제목": p["title"], "게시판": p.get("board", "-")}
+        try:
+            post = src.fetch_post(p["key"].split(":")[1])
+            blocks = post["blocks"]
+            imgs = [b for b in blocks if b["t"] == "img"]
+            raws = []
+            for b in imgs[:3]:
+                try:
+                    raws.append(src.download_image(b["src"]))
+                except Exception:  # noqa: BLE001
+                    pass
+            row["글자수"] = sum(len(b["v"]) for b in blocks if b["t"] == "text")
+            row["이미지"] = len(imgs)
+            data, reason = rewrite.rewrite(p["title"], blocks, images=raws)
+            if data is None:
+                row.update(판정="재채점 탈락", 이유=str(reason)[:110])
+            else:
+                row.update(판정="재채점 통과", 점수=data.get("fit"), 이유=str(data.get("fit_reason", ""))[:90])
+        except Exception as exc:  # noqa: BLE001
+            row.update(판정="오류", 이유=f"{type(exc).__name__}: {str(exc)[:60]}")
+        results.append(row)
+        log(f"재채점 {len(results)}/{len(picked)}")
+    (st.STATE_DIR / "audit.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+    log("재채점 완료: 통과 %d / 탈락 %d / 오류 %d" % (
+        sum(r["판정"] == "재채점 통과" for r in results), sum(r["판정"] == "재채점 탈락" for r in results),
+        sum(r["판정"] == "오류" for r in results)))
+
+
 def calibrate(n):
     """과거에 올린 글 몇 개를 새 기준으로 다시 채점해 결과를 calibration.json 에 남긴다 (올리지 않는다).
     문제 글이 걸러지고 정상 글이 통과하는지 확인하려는 용도다."""
@@ -409,7 +444,12 @@ def main():
     ap.add_argument("--count", type=int, default=0)
     ap.add_argument("--calibrate", type=int, default=0, help="과거 글 N개를 새 기준으로 다시 채점 (올리지 않음)")
     ap.add_argument("--preview", type=int, default=0, help="지금 후보 N개를 새 필터로 미리 판정 (올리지 않음)")
+    ap.add_argument("--audit", type=int, default=0, help="최근에 올라간 글 N개를 지금 필터로 다시 채점 (올리지 않음)")
     args = ap.parse_args()
+    if args.audit:
+        if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+            sys.exit("GEMINI_API_KEY 가 없다")
+        return audit(args.audit)
     if args.preview:
         if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
             sys.exit("GEMINI_API_KEY 가 없다")

@@ -1,2 +1,2 @@
-0
-# back to normal scheduling; no manual post
+audit 40
+# rescore recently posted posts with the final filter
