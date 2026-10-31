@@ -102,3 +102,19 @@ def create_post(token, title, content_html, nickname, thumbnail="", board=None):
     res = _request("/posts", token, "POST", payload=payload)
     post = res.get("post") or res.get("data") or res
     return post.get("id")
+
+
+def move_post(token, post_id, board):
+    """글을 다른 게시판으로 옮긴다 (본문/제목/닉네임은 그대로). 이미 그 게시판이면 아무것도 안 한다."""
+    res = _request(f"/posts/{post_id}", token)
+    d = res.get("post") or res.get("data") or res
+    if d.get("board_type") == board:
+        return False
+    payload = {
+        "board_type": board, "author_nickname": d.get("author_nickname", ""),
+        "is_notice": d.get("is_notice", False), "is_pinned": d.get("is_pinned", False),
+        "is_published": d.get("is_published", True), "title": d.get("title", ""),
+        "thumbnail": d.get("thumbnail") or "", "content": d.get("content", ""),
+    }
+    _request(f"/posts/{post_id}", token, "PUT", payload=payload)
+    return True

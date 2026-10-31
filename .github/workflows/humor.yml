@@ -60,6 +60,10 @@ jobs:
         run: |
           COUNT="${{ github.event.inputs.count }}"
           if [ "${{ github.event_name }}" = "push" ]; then
+            if head -1 run_request.txt | grep -q '^move'; then
+              python -m bot.run --move
+              exit 0
+            fi
             if head -1 run_request.txt | grep -q '^audit'; then
               python -m bot.run --audit "$(head -1 run_request.txt | tr -dc '0-9')"
               exit 0

@@ -1,2 +1,2 @@
-audit 40
-# rescore recently posted posts with the final filter
+move
+# move all non-free bot posts to the free board

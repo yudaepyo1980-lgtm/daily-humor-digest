@@ -38,6 +38,7 @@ QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MIN_OKNOK = 15            # 추천수가 이보다 낮은 후보는 읽지 않는다
+TARGET_BOARD = os.environ.get("TARGET_BOARD") or "free"
 MAX_FAILS_PER_ITEM = 3     # 같은 글이 기술적 이유로 이 횟수 실패하면 포기한다
 MAX_CONSECUTIVE_FAILS = 4  # 연속으로 이만큼 실패하면 시스템 문제로 보고 실행을 실패 처리한다
 _consecutive_fails = 0
@@ -229,7 +230,7 @@ def process_one(state, token, dry):
             return True
 
         nick = st.pick_nick(state)
-        board = data.get("board") or rewrite.DEFAULT_BOARD
+        board = TARGET_BOARD   # 이곳에서 올리는 글은 모두 자유게시판. (AI 의 게시판 분류 값은 기록만 한다)
         admin_id = admin.create_post(token, data["title"], content, nick, thumb, board)
         state["posted"].append({
             "key": key, "admin_id": admin_id, "nick": nick, "board": board,
@@ -319,6 +320,29 @@ def run_schedule(state, token, dry):
             break
         state["last_run"] = now_kst().isoformat()
         st.save(state)
+
+
+def move_to_free():
+    """봇이 올린 글 중 자유게시판이 아닌 곳에 있는 글을 모두 자유게시판으로 옮긴다."""
+    state = st.load()
+    token = admin.login()
+    moved = skipped = failed = 0
+    for p in state["posted"]:
+        if p.get("board") in (None, "", TARGET_BOARD):
+            continue
+        try:
+            if admin.move_post(token, p["admin_id"], TARGET_BOARD):
+                moved += 1
+            else:
+                skipped += 1            # 이미 옮겨져 있었음
+            p["board"] = TARGET_BOARD
+            plog(f"  이동: #{p['admin_id']} -> {TARGET_BOARD}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            log(f"  이동 실패 #{p['admin_id']} ({type(exc).__name__})")
+        time.sleep(0.5)
+    st.save(state)
+    log(f"게시판 이동 완료: 옮김 {moved} / 이미 자유게시판 {skipped} / 실패 {failed}")
 
 
 def audit(n):
@@ -444,8 +468,11 @@ def main():
     ap.add_argument("--count", type=int, default=0)
     ap.add_argument("--calibrate", type=int, default=0, help="과거 글 N개를 새 기준으로 다시 채점 (올리지 않음)")
     ap.add_argument("--preview", type=int, default=0, help="지금 후보 N개를 새 필터로 미리 판정 (올리지 않음)")
+    ap.add_argument("--move", action="store_true", help="자유게시판이 아닌 곳에 있는 봇 글을 모두 자유게시판으로 옮김")
     ap.add_argument("--audit", type=int, default=0, help="최근에 올라간 글 N개를 지금 필터로 다시 채점 (올리지 않음)")
     args = ap.parse_args()
+    if args.move:
+        return move_to_free()
     if args.audit:
         if rewrite.provider() == "gemini" and not os.environ.get("GEMINI_API_KEY"):
             sys.exit("GEMINI_API_KEY 가 없다")
