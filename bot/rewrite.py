@@ -99,7 +99,8 @@ BOARDS = ("free", "humor", "sports_talk")   # 올릴 수 있는 게시판 코드
 DEFAULT_BOARD = "free"
 MIN_FIT = 4            # 이 점수 미만이면 올리지 않는다
 MIN_FIT_SHORT = 5      # 글자가 사실상 없는(이미지만 있는) 글은 더 엄격하게
-REASON_BLOCK = ("캐릭터", "일러스트", "애니", "만화", "웹툰", "팬아트", "서브컬처", "코스프레", "조롱", "저격", "논란")
+REASON_BLOCK = ("캐릭터", "일러스트", "애니", "만화", "웹툰", "팬아트", "서브컬처", "코스프레", "조롱", "저격", "논란",
+                "알아야", "배경지식", "특정 게임", "굿즈", "DLC", "패치", "팬덤")
 SHORT_TEXT_CHARS = 10  # 과거 글 채점(10-29)에서 40자로 하면 멀쩡한 짧은 썰까지 대부분 탈락해 10자로 낮춤
 GEMINI_MODELS = os.environ.get("GEMINI_MODELS") or "gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -201,14 +202,30 @@ def _call_gemini(prompt, timeout, images=None):
     raise RuntimeError(f"gemini 모든 모델 실패 ({last})")
 
 
+def _ask(prompt, timeout, images):
+    """모델에 한 번 물어 JSON 을 돌려받는다. 깨진 JSON/서버 과부하 같은 일시 오류는 한 번 더 시도한다."""
+    last = None
+    for attempt in range(2):
+        try:
+            text = (_call_gemini(prompt, min(timeout, GEMINI_TIMEOUT), images)
+                    if provider() == "gemini" else _call_claude(prompt, timeout))
+            return _extract_json(text)
+        except Blocked:
+            raise
+        except (ValueError, RuntimeError) as exc:   # JSONDecodeError 는 ValueError 의 하위
+            last = exc
+            if attempt == 0:
+                time.sleep(20)
+    raise last
+
+
 def rewrite(title, blocks, timeout=300, images=None):
     body, img_count = blocks_to_prompt(blocks)
     prompt = PROMPT.format(title=title, body=body[:6000])
     try:
-        text = _call_gemini(prompt, min(timeout, GEMINI_TIMEOUT), images) if provider() == "gemini" else _call_claude(prompt, timeout)
+        data = _ask(prompt, timeout, images)
     except Blocked as exc:
         return None, f"모델 안전 필터({exc})"
-    data = _extract_json(text)
     if data.get("skip"):
         return None, data.get("reason", "")
     if not data.get("title") or not data.get("body"):
@@ -225,6 +242,20 @@ def rewrite(title, blocks, timeout=300, images=None):
     hit = [w for w in REASON_BLOCK if w in reason_text]
     if hit:          # 모델이 점수는 높게 주고도 이유에는 서브컬처/조롱을 적은 경우 (모순)
         return None, f"결 불일치(판정 이유에 '{hit[0]}' 언급): {reason_text[:60]}"
+    if fit == need:  # 아슬아슬하게 통과한 글은 한 번 더 심사해서 둘 다 통과해야 올린다 (판정 흔들림 방지)
+        try:
+            second = _ask(prompt, timeout, images)
+        except Blocked as exc:
+            return None, f"2차 심사 안전 필터({exc})"
+        except Exception:  # noqa: BLE001
+            return None, "2차 심사 실패(보수적으로 탈락)"
+        try:
+            fit2 = int(second.get("fit", 0))
+        except (TypeError, ValueError):
+            fit2 = 0
+        reason2 = str(second.get("fit_reason", ""))
+        if second.get("skip") or fit2 < need or any(w in reason2 for w in REASON_BLOCK):
+            return None, f"결 불일치(2차 심사 탈락 fit={fit2}): {reason2[:60]}"
     if data.get("board") not in BOARDS:   # 모르는 값이면 기본 게시판
         data["board"] = DEFAULT_BOARD
     if isinstance(data["body"], str):
