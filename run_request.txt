@@ -1,2 +1,1 @@
-5
-# five-post test
+# no manual post; scheduled runs post to the new site
