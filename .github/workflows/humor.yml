@@ -54,6 +54,7 @@ jobs:
           # 재작성은 Gemini 무료 API 로만 한다. Claude 는 쓰지 않으므로 Claude 사용량이 차감되지 않는다.
           REWRITE_PROVIDER: gemini
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NUDE_API_KEY: ${{ secrets.NUDE_API_KEY }}
           SITE_LOGIN_ID: ${{ secrets.SITE_LOGIN_ID }}
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           STATE_DIR: ${{ github.workspace }}/private

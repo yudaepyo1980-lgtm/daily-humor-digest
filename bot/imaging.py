@@ -46,3 +46,35 @@ def enhance(raw, name):
         return buf.getvalue(), "image/jpeg", stem + ".jpg"
     except Exception:  # noqa: BLE001
         return raw, None, name
+
+
+# ---- 새 사이트용: 서버가 사진을 다시 줄이지 않는다. 올리기 전에 WebP 로 줄인다 (사진 5MB, gif 4MB 제한) ----
+NUDE_MAX_WIDTH = 1600
+NUDE_MAX_PHOTO = 5 * 1024 * 1024
+NUDE_MAX_GIF = 4 * 1024 * 1024
+
+
+def for_nude(raw, name):
+    """(바이트, content_type, 파일명) 을 돌려준다. 올릴 수 없는 파일이면 None."""
+    stem = name.rsplit(".", 1)[0]
+    if Image is None:
+        return None
+    try:
+        im = Image.open(io.BytesIO(raw))
+        if getattr(im, "is_animated", False):          # 움짤: 용량이 맞으면 그대로, 아니면 올릴 수 없다
+            if im.format == "GIF" and len(raw) <= NUDE_MAX_GIF:
+                return raw, "image/gif", stem + ".gif"
+            return None
+        im.load()
+        has_alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
+        im = im.convert("RGBA" if has_alpha else "RGB")
+        if im.width > NUDE_MAX_WIDTH:
+            im = im.resize((NUDE_MAX_WIDTH, round(im.height * NUDE_MAX_WIDTH / im.width)), Image.LANCZOS)
+        for quality in (82, 74, 66, 58):
+            buf = io.BytesIO()
+            im.save(buf, "WEBP", quality=quality, method=6)
+            if buf.tell() <= NUDE_MAX_PHOTO:
+                return buf.getvalue(), "image/webp", stem + ".webp"
+        return None
+    except Exception:  # noqa: BLE001
+        return None

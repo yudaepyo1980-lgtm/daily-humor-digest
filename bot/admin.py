@@ -1,5 +1,10 @@
 """게시 대상 사이트 API: 로그인, 이미지 업로드, 글 등록.
 
+두 가지 방식을 지원한다.
+  1) 열쇠 방식(새 사이트): 환경변수 NUDE_API_KEY(ntk_ 로 시작하는 열쇠)와 설정의 nude_api_base 가 있으면 쓴다.
+     로그인 없이 Authorization: Bearer 열쇠 로 글/사진을 올린다.
+  2) 로그인 방식(기존 사이트): 위가 없으면 SITE_LOGIN_ID / SITE_PASSWORD 로 로그인해서 올린다.
+
 사이트 주소와 API 모양은 코드에 두지 않고 비공개 설정 파일에서 읽는다.
     <STATE_DIR>/site_config.json
         {"api_base": "...", "host": "...", "login_id_field": "...",
@@ -13,6 +18,7 @@
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 import uuid
@@ -64,6 +70,8 @@ def _request(path, token=None, method="GET", payload=None, raw=None, ctype=None)
 
 
 def login():
+    if key_backend():                      # 열쇠 방식은 로그인이 필요 없다
+        return os.environ["NUDE_API_KEY"].strip()
     cfg = _config()
     res = _request("/auth/login", method="POST", payload={
         cfg.get("login_id_field", "login_id"): os.environ["SITE_LOGIN_ID"],
@@ -76,7 +84,9 @@ def login():
 
 
 def upload_image(token, filename, data, content_type="image/jpeg"):
-    """이미지를 올리고 사이트가 쓰는 전체 주소를 돌려준다."""
+    """이미지를 올리고 사이트가 쓰는 주소를 돌려준다."""
+    if key_backend():
+        return key_upload_image(filename, data, content_type)
     cfg = _config()
     field = cfg.get("upload_field", "image")
     boundary = uuid.uuid4().hex
@@ -92,7 +102,9 @@ def upload_image(token, filename, data, content_type="image/jpeg"):
     return url if url.startswith("http") else cfg["host"] + url
 
 
-def create_post(token, title, content_html, nickname, thumbnail="", board=None):
+def create_post(token, title, content_html, nickname, thumbnail="", board=None, source_key=None):
+    if key_backend():
+        return key_create_post(title, content_html, nickname, board or _config().get("nude_board", "free"), source_key)
     cfg = _config()
     payload = {
         "board_type": board or cfg.get("board", "free"), "author_nickname": nickname,
@@ -118,3 +130,69 @@ def move_post(token, post_id, board):
     }
     _request(f"/posts/{post_id}", token, "PUT", payload=payload)
     return True
+
+
+# ---------------------------------------------------------------- 열쇠 방식 (새 사이트)
+
+class NickRejected(Exception):
+    """작성자 닉네임이 거절됨(실제 회원 닉네임과 같거나 운영자처럼 보임 등)."""
+
+
+def key_backend():
+    """열쇠 방식을 쓰는지. 열쇠와 새 사이트 주소가 모두 있어야 한다."""
+    if not os.environ.get("NUDE_API_KEY", "").strip():
+        return False
+    try:
+        return bool(_config().get("nude_api_base"))
+    except RuntimeError:
+        return False
+
+
+def _krequest(path, method="GET", payload=None, raw=None, ctype=None):
+    """새 사이트 API 호출. 성공하면 (HTTP 상태, 응답 JSON), 실패하면 RuntimeError(상태, 까닭)."""
+    base = _config()["nude_api_base"].rstrip("/")
+    key = os.environ["NUDE_API_KEY"].strip()
+    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    else:
+        data = raw
+        if ctype:
+            headers["Content-Type"] = ctype
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, (json.loads(body) if body else {})
+    except urllib.error.HTTPError as exc:
+        try:
+            info = json.loads(exc.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            info = {}
+        raise RuntimeError(f"{exc.code}|{str(info.get('까닭', ''))[:120]}") from exc
+
+
+def key_upload_image(filename, data, content_type):
+    """사진을 올리고 본문에 넣을 주소(/media/...)를 돌려준다. 파일 자체를 몸으로 보낸다."""
+    _, res = _krequest("/api/admin/media", "POST", raw=data, ctype=content_type)
+    if not res.get("됨") or not res.get("주소"):
+        raise RuntimeError("업로드 응답에 주소가 없다")
+    return res["주소"]
+
+
+def key_create_post(title, body_html, nickname, board, source_key=None):
+    """글을 올리고 글 id 를 돌려준다. 같은 sourceKey 가 이미 있으면 그 글 id 를 돌려준다."""
+    payload = {"board": board, "title": title[:120], "author": nickname, "body": body_html, "visible": True}
+    if source_key and re.fullmatch(r"[A-Za-z0-9:_./-]{1,100}", source_key):
+        payload["sourceKey"] = source_key
+    try:
+        status, res = _krequest("/api/admin/posts", "POST", payload=payload)
+    except RuntimeError as exc:
+        code, _, why = str(exc).partition("|")
+        if code == "400" and any(w in why for w in ("작성자", "닉네임", "author", "운영자", "회원")):
+            raise NickRejected(why) from exc
+        raise
+    if not res.get("됨"):
+        raise RuntimeError(f"등록 실패: {str(res.get('까닭', ''))[:80]}")
+    return (res.get("글") or {}).get("id")

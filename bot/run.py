@@ -205,7 +205,14 @@ def process_one(state, token, dry):
                     (OUT / name).write_bytes(raw)
                     image_urls[n] = name
                 else:
-                    raw2, new_ctype, name = imaging.enhance(raw, name)
+                    if admin.key_backend():     # 새 사이트: 서버가 줄여주지 않으니 올리기 전에 WebP 로 줄인다
+                        packed = imaging.for_nude(raw, name)
+                        if packed is None:
+                            log(f"  이미지 {n} 올릴 수 없는 형식/용량")
+                            continue
+                        raw2, new_ctype, name = packed
+                    else:                       # 기존 사이트: 사이트가 다시 줄이므로 2배로 키워 올린다
+                        raw2, new_ctype, name = imaging.enhance(raw, name)
                     image_urls[n] = admin.upload_image(token, name, raw2, new_ctype or ctype)
             except Exception:  # noqa: BLE001
                 log(f"  이미지 {n} 업로드 실패")
@@ -231,7 +238,16 @@ def process_one(state, token, dry):
 
         nick = st.pick_nick(state)
         board = TARGET_BOARD   # 이곳에서 올리는 글은 모두 자유게시판. (AI 의 게시판 분류 값은 기록만 한다)
-        admin_id = admin.create_post(token, data["title"], content, nick, thumb, board)
+        for attempt in range(3):   # 닉네임이 거절되면(실제 회원 닉네임 등) 다른 닉네임으로 다시 시도한다
+            try:
+                admin_id = admin.create_post(token, data["title"], content, nick, thumb, board, source_key=key)
+                break
+            except admin.NickRejected:
+                log("  닉네임이 거절돼 다른 닉네임으로 다시 시도")
+                nick = st.pick_nick(state)
+        else:
+            tech_fail(state, item, "닉네임 거절 반복", dry)
+            continue
         state["posted"].append({
             "key": key, "admin_id": admin_id, "nick": nick, "board": board,
             "title": data["title"], "at": now_kst().isoformat(),

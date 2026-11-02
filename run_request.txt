@@ -1,2 +1,2 @@
-audit 40
-# rescore with second-opinion judging 2203
+0
+# no manual post; waiting for the site key

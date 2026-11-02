@@ -37,6 +37,14 @@ python -m bot.run --count 1             # 지금 1편 등록
 python -m bot.run                       # 스케줄대로
 ```
 
+## 게시 대상 사이트 (두 방식)
+
+- **새 사이트(열쇠 방식)**: Secret `NUDE_API_KEY`(운영자가 발급한 `ntk_` 열쇠)가 있고 비공개 설정에 `nude_api_base` 가
+  있으면 이 방식으로 올린다. 로그인 없이 `Authorization: Bearer` 로 글/사진을 올리고, 글마다 `sourceKey`(`ruliweb:글번호`)를
+  넣어 같은 글이 두 번 생기지 않게 한다. 서버가 사진을 줄이지 않으므로 올리기 전에 WebP(품질 82, 가로 1600px 이하)로 줄이고,
+  사진 5MB / gif 4MB 를 넘으면 올리지 않는다. 닉네임이 거절되면 다른 닉네임으로 다시 시도한다.
+- **기존 사이트(로그인 방식)**: `NUDE_API_KEY` 가 없으면 `SITE_LOGIN_ID` / `SITE_PASSWORD` 로 로그인해서 올린다.
+
 ## 구성: 공개 저장소 + 비공개 저장소
 
 - 이 저장소(공개)에는 범용 코드만 있다. 사이트 주소/API 모양/닉네임/올린 글 기록은 없다.
@@ -50,7 +58,8 @@ python -m bot.run                       # 스케줄대로
 | 이름 | 값 |
 |---|---|
 | `GEMINI_API_KEY` | Google AI Studio 에서 만든 API 키 |
-| `SITE_LOGIN_ID` | 로그인 아이디 |
+| `NUDE_API_KEY` | 새 사이트 자동 게시 열쇠 (`ntk_` 로 시작하는 44자) |
+| `SITE_LOGIN_ID` | (기존 사이트용) 로그인 아이디 |
 | `SITE_PASSWORD` | 로그인 비밀번호 |
 | `PRIVATE_REPO` | 비공개 저장소 이름 (`계정/저장소`) |
 | `PRIVATE_REPO_TOKEN` | 비공개 저장소 하나에만 읽기/쓰기 권한을 준 토큰 (fine-grained, Contents: Read and write) |
