@@ -32,7 +32,7 @@ KST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 
-POSTS_PER_HOUR = (0.8, 1.2)   # 평균 시간당 1편
+POSTS_PER_HOUR = (1, 1)       # 시간당 1편 = 하루 24편
 MAX_PER_RUN = 8
 QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
@@ -275,8 +275,8 @@ def process_one(state, token, dry):
 # 그래서 "몇 시에 몇 편" 이 아니라 "마지막 실행 이후 흐른 시간 x 시간당 편수" 로 계산해서
 # 밀린 만큼 한꺼번에 따라잡는다. 소수점은 carry 에 남겨 다음 실행으로 넘긴다.
 
-MAX_CATCHUP_HOURS = 4      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
-MAX_PER_DAY = 30           # 하루 상한
+MAX_CATCHUP_HOURS = 6      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
+MAX_PER_DAY = 24           # 하루 상한
 
 
 def plan_count(state):
@@ -303,7 +303,7 @@ MAX_RUN_MINUTES = 150      # 한 번 실행에서 편 사이 대기까지 포함
 MIN_GAP_SEC = 45
 MAX_GAP_SEC = 40 * 60
 CATCHUP_TARGET_MIN = 50    # 밀린 글을 이 시간 안에 올리는 것을 목표로 간격 평균을 정한다
-NORMAL_MEAN_MIN = 24       # 밀린 게 적을 때의 평균 간격 (시간당 2.5편)
+NORMAL_MEAN_MIN = 40       # 밀린 게 적을 때의 평균 간격
 
 
 def random_gap(n=1):
