@@ -32,7 +32,7 @@ KST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 
-POSTS_PER_HOUR = (2, 3)
+POSTS_PER_HOUR = (0.8, 1.2)   # 평균 시간당 1편
 MAX_PER_RUN = 8
 QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
@@ -276,7 +276,7 @@ def process_one(state, token, dry):
 # 밀린 만큼 한꺼번에 따라잡는다. 소수점은 carry 에 남겨 다음 실행으로 넘긴다.
 
 MAX_CATCHUP_HOURS = 4      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
-MAX_PER_DAY = 72           # 하루 상한 (시간당 3편 x 24)
+MAX_PER_DAY = 30           # 하루 상한
 
 
 def plan_count(state):
