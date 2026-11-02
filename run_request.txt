@@ -1,2 +1,1 @@
-0
-# no manual post; waiting for the site key
+1
