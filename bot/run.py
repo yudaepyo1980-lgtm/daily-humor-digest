@@ -97,7 +97,9 @@ def to_html(body, image_urls):
         m = re.fullmatch(r"\s*\[IMG(\d+)\]\s*", line)
         if m:
             url = image_urls.get(int(m.group(1)))
-            if url:
+            if url and url.lower().endswith((".mp4", ".webm")):   # 움짤은 mp4 로 올라온다 (서버가 자동재생/반복 처리)
+                parts.append(f'<p><video src="{url}"></video></p>')
+            elif url:
                 parts.append(f'<p><img src="{url}" style="max-width:100%;height:auto;" /></p>')
             continue
         parts.append("<p>" + html.escape(line).replace("\n", "<br>") + "</p>")
@@ -211,6 +213,10 @@ def process_one(state, token, dry):
                             log(f"  이미지 {n} 올릴 수 없는 형식/용량")
                             continue
                         raw2, new_ctype, name = packed
+                        ms = state.setdefault("media_stats", {"files": 0, "in": 0, "out": 0})
+                        ms["files"] += 1
+                        ms["in"] += len(raw)
+                        ms["out"] += len(raw2)
                     else:                       # 기존 사이트: 사이트가 다시 줄이므로 2배로 키워 올린다
                         raw2, new_ctype, name = imaging.enhance(raw, name)
                     image_urls[n] = admin.upload_image(token, name, raw2, new_ctype or ctype)

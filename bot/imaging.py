@@ -48,10 +48,59 @@ def enhance(raw, name):
         return raw, None, name
 
 
-# ---- 새 사이트용: 서버가 사진을 다시 줄이지 않는다. 올리기 전에 WebP 로 줄인다 (사진 5MB, gif 4MB 제한) ----
+# ---- 새 사이트용: 서버가 사진을 다시 줄이지 않는다. 올리기 전에 화질은 지키면서 용량을 최대한 줄인다 ----
+# 규칙(안내서): 사진 5MB, gif 4MB, 영상(mp4/webm) 20MB. 저장공간 무료 10GB 라 줄일수록 오래 간다.
+#  - 사진 -> WebP. 기본은 손실 82. 색이 적은 이미지(캡처/글씨/도표)는 무손실과 비교해 더 작은 쪽을 쓴다.
+#  - 가로 1600px 넘는 것만 줄이고, 메타정보(EXIF 등)는 버린다. 폰 사진은 방향을 바로잡는다.
+#  - GIF 움짤 -> MP4 (보통 5~10배 작고 화질 같음. 자동재생/반복은 서버가 처리).
+import os
+import shutil
+import subprocess
+import tempfile
+
 NUDE_MAX_WIDTH = 1600
+NUDE_MAX_HEIGHT = 16000          # WebP 한 변 한계(16383) 아래로
 NUDE_MAX_PHOTO = 5 * 1024 * 1024
 NUDE_MAX_GIF = 4 * 1024 * 1024
+NUDE_MAX_VIDEO = 20 * 1024 * 1024
+VIDEO_MAX_WIDTH = 720
+
+
+def _ffmpeg():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
+        return shutil.which("ffmpeg")
+
+
+def gif_to_mp4(raw):
+    """GIF 바이트를 MP4 바이트로 바꾼다. 실패하면 None."""
+    exe = _ffmpeg()
+    if not exe:
+        return None
+    with tempfile.TemporaryDirectory() as d:
+        src, dst = os.path.join(d, "in.gif"), os.path.join(d, "out.mp4")
+        with open(src, "wb") as f:
+            f.write(raw)
+        for crf, width in ((26, VIDEO_MAX_WIDTH), (30, 540), (34, 400)):   # 20MB 를 넘으면 더 줄여 다시 시도
+            cmd = [exe, "-y", "-loglevel", "error", "-i", src, "-movflags", "+faststart", "-pix_fmt", "yuv420p",
+                   "-vf", f"scale=trunc(min(iw\\,{width})/2)*2:-2", "-c:v", "libx264", "-preset", "slow",
+                   "-crf", str(crf), "-an", dst]
+            try:
+                subprocess.run(cmd, check=True, timeout=180, capture_output=True)
+                data = open(dst, "rb").read()
+            except Exception:  # noqa: BLE001
+                return None
+            if 0 < len(data) <= NUDE_MAX_VIDEO:
+                return data
+    return None
+
+
+def _webp_bytes(im, **kw):
+    buf = io.BytesIO()
+    im.save(buf, "WEBP", method=6, **kw)
+    return buf.getvalue()
 
 
 def for_nude(raw, name):
@@ -61,20 +110,40 @@ def for_nude(raw, name):
         return None
     try:
         im = Image.open(io.BytesIO(raw))
-        if getattr(im, "is_animated", False):          # 움짤: 용량이 맞으면 그대로, 아니면 올릴 수 없다
-            if im.format == "GIF" and len(raw) <= NUDE_MAX_GIF:
-                return raw, "image/gif", stem + ".gif"
+        if getattr(im, "is_animated", False):
+            if im.format == "GIF":
+                mp4 = gif_to_mp4(raw)                       # 움짤은 mp4 가 훨씬 작다
+                if mp4 is not None and len(mp4) < len(raw):
+                    return mp4, "video/mp4", stem + ".mp4"
+                if len(raw) <= NUDE_MAX_GIF:                # 변환이 안 되거나 더 크면 gif 그대로
+                    return raw, "image/gif", stem + ".gif"
             return None
+        from PIL import ImageOps
+        im = ImageOps.exif_transpose(im)                    # 폰 사진 방향 보정 (메타정보는 저장하지 않는다)
         im.load()
         has_alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
         im = im.convert("RGBA" if has_alpha else "RGB")
-        if im.width > NUDE_MAX_WIDTH:
-            im = im.resize((NUDE_MAX_WIDTH, round(im.height * NUDE_MAX_WIDTH / im.width)), Image.LANCZOS)
+        w, h = im.size
+        scale = min(1.0, NUDE_MAX_WIDTH / w, NUDE_MAX_HEIGHT / h)
+        if scale < 1.0:
+            im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+        best = None
         for quality in (82, 74, 66, 58):
-            buf = io.BytesIO()
-            im.save(buf, "WEBP", quality=quality, method=6)
-            if buf.tell() <= NUDE_MAX_PHOTO:
-                return buf.getvalue(), "image/webp", stem + ".webp"
-        return None
+            data = _webp_bytes(im, quality=quality)
+            if len(data) <= NUDE_MAX_PHOTO:
+                best = data
+                break
+        # 색이 적은 이미지(캡처/글씨/도표)는 무손실이 화질도 완벽하고 더 작은 경우가 많다
+        try:
+            few_colors = im.convert("RGB").getcolors(maxcolors=65536) is not None
+        except Exception:  # noqa: BLE001
+            few_colors = False
+        if few_colors:
+            lossless = _webp_bytes(im, lossless=True)
+            if len(lossless) <= NUDE_MAX_PHOTO and (best is None or len(lossless) < len(best)):
+                best = lossless
+        if best is None:
+            return None
+        return best, "image/webp", stem + ".webp"
     except Exception:  # noqa: BLE001
         return None
