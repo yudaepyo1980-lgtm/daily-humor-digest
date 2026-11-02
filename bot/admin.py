@@ -102,9 +102,10 @@ def upload_image(token, filename, data, content_type="image/jpeg"):
     return url if url.startswith("http") else cfg["host"] + url
 
 
-def create_post(token, title, content_html, nickname, thumbnail="", board=None, source_key=None):
+def create_post(token, title, content_html, nickname, thumbnail="", board=None, source_key=None, published_at=None):
     if key_backend():
-        return key_create_post(title, content_html, nickname, board or _config().get("nude_board", "free"), source_key)
+        return key_create_post(title, content_html, nickname, board or _config().get("nude_board", "free"), source_key,
+                               published_at)
     cfg = _config()
     payload = {
         "board_type": board or cfg.get("board", "free"), "author_nickname": nickname,
@@ -181,11 +182,13 @@ def key_upload_image(filename, data, content_type):
     return res["주소"]
 
 
-def key_create_post(title, body_html, nickname, board, source_key=None):
+def key_create_post(title, body_html, nickname, board, source_key=None, published_at=None):
     """글을 올리고 글 id 를 돌려준다. 같은 sourceKey 가 이미 있으면 그 글 id 를 돌려준다."""
     payload = {"board": board, "title": title[:120], "author": nickname, "body": body_html, "visible": True}
     if source_key and re.fullmatch(r"[A-Za-z0-9:_./-]{1,100}", source_key):
         payload["sourceKey"] = source_key
+    if published_at:                    # 미래 시각이면 서버가 그때부터 보여준다 (예약 게시)
+        payload["publishedAt"] = published_at
     try:
         status, res = _krequest("/api/admin/posts", "POST", payload=payload)
     except RuntimeError as exc:

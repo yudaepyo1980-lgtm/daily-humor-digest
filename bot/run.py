@@ -106,6 +106,28 @@ def to_html(body, image_urls):
     return "\n".join(parts)
 
 
+SLOT_MEAN_MIN = 60         # 새 사이트: 예약 게시 간격의 평균 (시간당 1편)
+SLOT_MIN_MIN, SLOT_MAX_MIN = 25, 95
+
+
+def next_slot(state):
+    """새 사이트용 게시 시각. 글은 한꺼번에 올려 두고 공개 시각만 들쑥날쑥하게 예약한다.
+    봇이 기다리며 실행 시간을 쓰지 않아도 된다. 마지막 예약 시각 뒤에 25~95분을 더한다."""
+    now = now_kst()
+    last = state.get("last_slot")
+    base = now + timedelta(minutes=random.uniform(2, 10))
+    if last:
+        try:
+            prev = datetime.fromisoformat(last)
+            if prev > base:
+                base = prev
+        except ValueError:
+            pass
+    slot = base + timedelta(minutes=random.uniform(SLOT_MIN_MIN, SLOT_MAX_MIN) if last else 0)
+    state["last_slot"] = slot.isoformat(timespec="seconds")
+    return slot
+
+
 def note_skip(state, kind):
     """건너뛴 이유별 누적 횟수 (state.skip_stats). 필터가 잘 동작하는지 볼 때 쓴다."""
     stats = state.setdefault("skip_stats", {})
@@ -246,10 +268,12 @@ def process_one(state, token, dry):
             return True
 
         nick = st.pick_nick(state)
+        publish_at = next_slot(state) if admin.key_backend() else None
         board = TARGET_BOARD   # 이곳에서 올리는 글은 모두 자유게시판. (AI 의 게시판 분류 값은 기록만 한다)
         for attempt in range(3):   # 닉네임이 거절되면(실제 회원 닉네임 등) 다른 닉네임으로 다시 시도한다
             try:
-                admin_id = admin.create_post(token, data["title"], content, nick, thumb, board, source_key=key)
+                admin_id = admin.create_post(token, data["title"], content, nick, thumb, board, source_key=key,
+                                             published_at=publish_at.isoformat(timespec="seconds") if publish_at else None)
                 break
             except admin.NickRejected:
                 log("  닉네임이 거절돼 다른 닉네임으로 다시 시도")
@@ -259,7 +283,7 @@ def process_one(state, token, dry):
             continue
         state["posted"].append({
             "key": key, "admin_id": admin_id, "nick": nick, "board": board,
-            "title": data["title"], "at": now_kst().isoformat(),
+            "title": data["title"], "at": (publish_at or now_kst()).isoformat(),
         })
         _consecutive_fails = 0
         state.get("fails", {}).pop(key, None)
@@ -322,9 +346,11 @@ def run_schedule(state, token, dry):
     refresh_queue(state)
     st.save(state)
     started = time.monotonic()
-    time.sleep(random.randint(0, 120))  # 항상 같은 초에 올라가지 않게
+    scheduled = admin.key_backend() and not dry   # 새 사이트는 예약 게시라서 기다릴 필요가 없다
+    if not scheduled:
+        time.sleep(random.randint(0, 120))  # 항상 같은 초에 올라가지 않게
     for k in range(n):
-        if k:
+        if k and not scheduled:
             gap = random_gap(n)
             if (time.monotonic() - started + gap) / 60 > MAX_RUN_MINUTES:
                 # 시간이 모자라면 남은 편수는 다음 실행으로 넘긴다
