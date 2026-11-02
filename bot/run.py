@@ -220,8 +220,11 @@ def process_one(state, token, dry):
                     else:                       # 기존 사이트: 사이트가 다시 줄이므로 2배로 키워 올린다
                         raw2, new_ctype, name = imaging.enhance(raw, name)
                     image_urls[n] = admin.upload_image(token, name, raw2, new_ctype or ctype)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 log(f"  이미지 {n} 업로드 실패")
+                kind = "업로드 오류: " + str(exc)[:40]     # 로그가 비공개로 안 보이니 이유를 상태 파일에 센다
+                stats = state.setdefault("fail_stats", {})
+                stats[kind] = stats.get(kind, 0) + 1
         if imgs and not image_urls:
             tech_fail(state, item, "이미지가 하나도 안 올라감", dry)
             continue

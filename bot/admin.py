@@ -152,7 +152,7 @@ def _krequest(path, method="GET", payload=None, raw=None, ctype=None):
     """새 사이트 API 호출. 성공하면 (HTTP 상태, 응답 JSON), 실패하면 RuntimeError(상태, 까닭)."""
     base = _config()["nude_api_base"].rstrip("/")
     key = os.environ["NUDE_API_KEY"].strip()
-    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
+    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json", "User-Agent": "humor-bot/1.0"}
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
