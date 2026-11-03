@@ -32,7 +32,7 @@ KST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 
-POSTS_PER_HOUR = (1, 1)       # 시간당 1편 = 하루 24편
+POSTS_PER_HOUR = (1, 2)       # 시간당 1~2편 (평균 1.5편, 하루 약 36편)
 MAX_PER_RUN = 8
 QUEUE_REFRESH_MIN = 55
 MAX_IMAGES = 10
@@ -106,13 +106,13 @@ def to_html(body, image_urls):
     return "\n".join(parts)
 
 
-SLOT_MEAN_MIN = 60         # 새 사이트: 예약 게시 간격의 평균 (시간당 1편)
-SLOT_MIN_MIN, SLOT_MAX_MIN = 25, 95
+SLOT_MEAN_MIN = 40         # 새 사이트: 예약 게시 간격의 평균 (시간당 1편)
+SLOT_MIN_MIN, SLOT_MAX_MIN = 20, 60
 
 
 def next_slot(state):
     """새 사이트용 게시 시각. 글은 한꺼번에 올려 두고 공개 시각만 들쑥날쑥하게 예약한다.
-    봇이 기다리며 실행 시간을 쓰지 않아도 된다. 마지막 예약 시각 뒤에 25~95분을 더한다."""
+    봇이 기다리며 실행 시간을 쓰지 않아도 된다. 마지막 예약 시각 뒤에 20~60분을 더한다."""
     now = now_kst()
     last = state.get("last_slot")
     base = now + timedelta(minutes=random.uniform(2, 10))
@@ -300,7 +300,7 @@ def process_one(state, token, dry):
 # 밀린 만큼 한꺼번에 따라잡는다. 소수점은 carry 에 남겨 다음 실행으로 넘긴다.
 
 MAX_CATCHUP_HOURS = 6      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
-MAX_PER_DAY = 30           # 하루 안전 상한 (속도는 POSTS_PER_HOUR 가 정한다. 24 로 두면 24시간치에 예약글이 겹쳐 멈춘다)
+MAX_PER_DAY = 48           # 하루 안전 상한 (속도는 POSTS_PER_HOUR 가 정한다. 평균 속도 24시간치보다 크게 둬야 예약글이 겹쳐 멈추지 않는다)
 
 
 def plan_count(state):
