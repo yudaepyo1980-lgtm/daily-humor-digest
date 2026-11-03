@@ -300,7 +300,7 @@ def process_one(state, token, dry):
 # 밀린 만큼 한꺼번에 따라잡는다. 소수점은 carry 에 남겨 다음 실행으로 넘긴다.
 
 MAX_CATCHUP_HOURS = 6      # 아무리 오래 쉬었어도 이만큼만 따라잡는다
-MAX_PER_DAY = 24           # 하루 상한
+MAX_PER_DAY = 30           # 하루 안전 상한 (속도는 POSTS_PER_HOUR 가 정한다. 24 로 두면 24시간치에 예약글이 겹쳐 멈춘다)
 
 
 def plan_count(state):
