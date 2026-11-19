@@ -182,9 +182,22 @@ def key_upload_image(filename, data, content_type):
     return res["주소"]
 
 
+# 새 사이트: 작성자 이름 앞에 캐릭터 얼굴(이모지)을 붙인다. 닉네임에 동물 이름이 있으면 그 얼굴, 없으면 닉네임마다 고정된 얼굴.
+FACE_BY_WORD = (("곰", "🐻"), ("판다", "🐼"), ("고양이", "🐱"), ("토끼", "🐰"), ("수달", "🦦"), ("너구리", "🦝"), ("햄스터", "🐹"),
+                ("사자", "🦁"), ("붕어", "🐟"), ("거북", "🐢"), ("달팽이", "🐌"), ("선인장", "🌵"))
+FACES = ("🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐤", "🦉", "🐙")
+
+
+def with_face(nickname):
+    for word, face in FACE_BY_WORD:
+        if word in nickname:
+            return f"{face} {nickname}"
+    return f"{FACES[sum(ord(c) for c in nickname) % len(FACES)]} {nickname}"
+
+
 def key_create_post(title, body_html, nickname, board, source_key=None, published_at=None):
     """글을 올리고 글 id 를 돌려준다. 같은 sourceKey 가 이미 있으면 그 글 id 를 돌려준다."""
-    payload = {"board": board, "title": title[:120], "author": nickname, "body": body_html, "visible": True}
+    payload = {"board": board, "title": title[:120], "author": with_face(nickname), "body": body_html, "visible": True}
     if source_key and re.fullmatch(r"[A-Za-z0-9:_./-]{1,100}", source_key):
         payload["sourceKey"] = source_key
     if published_at:                    # 미래 시각이면 서버가 그때부터 보여준다 (예약 게시)
